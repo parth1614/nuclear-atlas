@@ -27,6 +27,19 @@ npm run build
 
 The Three.js models are procedural; no external model downloads or API keys are required. Scientific references are linked in the app and listed in `app/atlas-data.ts`. Sources are the U.S. Department of Energy, NRC, and ITER. Original Human Atlas code and anatomy assets were not reused.
 
+## Deploy to Vercel
+
+No application environment variables or API keys are required. Import this repository into Vercel with the repository root as the Root Directory. The committed `vercel.json` configures:
+
+- Framework preset: **Other** (`framework: null`).
+- Install command: `npm ci`.
+- Build command: `npm run build:vercel`.
+- Output directory: `dist/client`.
+
+The Vercel build exports the page as static HTML plus JavaScript, CSS, and fonts. All 3D interactions run in the browser. The build command supplies its own non-secret export flag; do not add it in the Vercel dashboard. If you previously deployed the Cloudflare build, deploy the latest `main` commit again.
+
+`npm run build` still builds the original Sites/Cloudflare Worker target. That output is not a Vercel deployment: serving its asset directory without the static export causes a platform 404. Use `npm run build:vercel` for Vercel.
+
 ## Validation
 
 The model checks cover finite geometry and particle transforms, component coverage, flow paths, timeline boundaries, assembly endpoints, and reaction accounting. Nested-dissection checks cover path resolution, all eight systems before the atomic phase, continuous forward/reverse sampling at every stop, component jumps, isotope nucleon counts, valence content, drag thresholds, and finite geometry at every layer. Type checking and the production build are separate checks.

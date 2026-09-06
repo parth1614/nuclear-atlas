@@ -35,6 +35,19 @@ const localBindingConfig = {
 };
 
 export default defineConfig(async () => {
+  const shared = {
+    css: { postcss: { plugins: [tailwindcss()] } },
+    server: isCodexSeatbeltSandbox
+      ? { watch: { useFsEvents: false, usePolling: true } }
+      : undefined,
+  };
+
+  // Vercel serves the exported HTML and assets. The interactive atlas has no
+  // server data or bindings, so this target needs neither Sites nor a Worker.
+  if (process.env.ATLAS_STATIC_EXPORT === '1') {
+    return { ...shared, plugins: [vinext()] };
+  }
+
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= 'false';
@@ -45,10 +58,7 @@ export default defineConfig(async () => {
   const { cloudflare } = await import('@cloudflare/vite-plugin');
 
   return {
-    css: { postcss: { plugins: [tailwindcss()] } },
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    ...shared,
     plugins: [
       vinext(),
       sites(),
