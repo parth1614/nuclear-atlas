@@ -5,6 +5,7 @@ import {
   DETAIL_ROOTS,
   depthRoute,
   depthSample,
+  depthForPath,
   resolveDetailPath,
   canEnter,
   dragCompletion,
@@ -47,7 +48,10 @@ test('The fission route reaches a U-235 nucleus through ceramic fuel', () => {
   assert.equal(chain.length, 7);
   assert.equal(chain.at(-1).shape, 'uranium');
   assert.equal(chain.at(-1).reaction, true);
-  assert.equal(chain.at(-1).children.length, 0);
+  assert.deepEqual(
+    chain.at(-1).children.map((n) => n.id),
+    ['proton', 'neutron'],
+  );
 });
 test('Fusion separates fuel nuclei from electrons, and coil cables from plasma', () => {
   const nuclei = resolveDetailPath('fusion', ['plasma', 'fuel-ions']);
@@ -110,38 +114,135 @@ for (const kind of ['fission', 'fusion'])
     materials.forEach((m) => m.dispose());
   });
 
-test('One depth sweep visits every fission level and reverses to the assembled machine', () => {
-  const route = depthRoute('fission');
-  assert.equal(route.length, 8);
-  const visited = new Set();
-  for (let p = 0; p <= 100; p += 0.5)
-    visited.add(depthSample(route, p).path.join('/'));
-  assert.equal(visited.size, route.length);
-  assert.equal(depthSample(route, 100).node.shape, 'uranium');
-  for (let p = 100; p >= 0; p -= 0.5)
-    assert.ok(visited.has(depthSample(route, p).path.join('/')));
-  assert.deepEqual(depthSample(route, 0).path, []);
-  assert.equal(depthSample(route, 0).separation, 0);
-});
-test('Fusion depth reaches nuclei; alternate paths preserve tritium and magnet interiors', () => {
-  assert.equal(depthSample(depthRoute('fusion'), 100).node.shape, 'deuterium');
-  assert.equal(
-    depthSample(depthRoute('fusion', ['plasma', 'fuel-ions', 'tritium']), 100)
-      .node.shape,
-    'tritium',
-  );
-  assert.equal(
-    depthSample(depthRoute('fusion', ['coils']), 100).node.id,
-    'filaments',
-  );
-});
-test('All system sliders reach their innermost modeled component without crossing branches', () => {
-  for (const kind of ['fission', 'fusion'])
-    for (const root of DETAIL_ROOTS[kind]) {
-      const route = depthRoute(kind, [root.id]);
-      assert.equal(route[1].node.id, root.id);
-      assert.equal(depthSample(route, 100).node.children.length, 0);
-      for (const level of route.slice(1))
-        assert.equal(resolveDetailPath(kind, level.path).at(-1), level.node);
+for (const kind of ['fission', 'fusion']) {
+  test(`${kind}: the fixed slider tour opens all eight systems before any atomic close-up`, () => {
+    const route = depthRoute(kind);
+    assert.equal(route[0].phase, 'machine');
+    assert.equal(route[0].end, 15);
+    const components = route.filter((level) => level.phase === 'components');
+    assert.deepEqual(
+      [...new Set(components.map((level) => level.path[0]))],
+      DETAIL_ROOTS[kind].map((n) => n.id),
+    );
+    assert.deepEqual(
+      [...new Set(components.map((level) => level.systemIndex))],
+      [0, 1, 2, 3, 4, 5, 6, 7],
+    );
+    assert.ok(
+      components.every((level) => level.start >= 15 && level.end <= 75),
+    );
+    const particles = route.filter((level) => level.phase === 'particles');
+    assert.equal(particles[0].start, 75);
+    assert.ok(particles.every((level) => level.start >= 75));
+    assert.equal(route.at(-1).node.shape, 'neutron');
+    assert.ok(route.at(-1).node.children.some((n) => n.shape === 'quark'));
+    for (let i = 1; i < route.length; i++)
+      assert.ok(Math.abs(route[i - 1].end - route[i].start) < 1e-8);
+  });
+  test(`${kind}: continuous dragging visits every stop in both directions`, () => {
+    const route = depthRoute(kind);
+    const visited = new Set();
+    for (let p = 0; p <= 100; p += 0.05)
+      visited.add(depthSample(route, p).index);
+    assert.equal(visited.size, route.length);
+    for (let p = 100; p >= 0; p -= 0.05) {
+      const sample = depthSample(route, p);
+      assert.ok(visited.has(sample.index));
+      assert.ok(sample.separation >= 0 && sample.separation <= 100);
     }
+    assert.deepEqual(depthSample(route, 0).path, []);
+    assert.equal(depthSample(route, 100).index, route.length - 1);
+    for (const level of route)
+      assert.equal(
+        depthSample(route, level.start).path.join('/'),
+        level.path.join('/'),
+      );
+  });
+  test(`${kind}: component jumps retain the complete itinerary and aliases resolve`, () => {
+    for (const root of DETAIL_ROOTS[kind]) {
+      const value = depthForPath(kind, [root.id]);
+      assert.equal(depthSample(depthRoute(kind), value).path[0], root.id);
+      assert.equal(
+        depthRoute(kind).filter((level) => level.path.length === 1).length,
+        8,
+      );
+    }
+    const alias =
+      kind === 'fission'
+        ? ['vessel', 'fuel', 'fuel-rods']
+        : ['vessel', 'plasma', 'fuel-ions'];
+    assert.equal(
+      depthSample(depthRoute(kind), depthForPath(kind, alias)).node,
+      resolveDetailPath(kind, alias).at(-1),
+    );
+  });
+}
+test('Nuclear dissection preserves each isotope’s complete proton and neutron counts', () => {
+  for (const [kind, path, counts] of [
+    [
+      'fission',
+      [
+        'fuel',
+        'fuel-rods',
+        'pellets',
+        'pellet',
+        'crystal',
+        'uranium-atom',
+        'nucleus',
+      ],
+      [92, 143],
+    ],
+    ['fusion', ['plasma', 'fuel-ions', 'deuterium'], [1, 1]],
+    ['fusion', ['plasma', 'fuel-ions', 'tritium'], [1, 2]],
+  ]) {
+    const model = createDetailModel(resolveDetailPath(kind, path).at(-1));
+    assert.deepEqual(
+      model.parts.map((p) => p.id),
+      ['proton', 'neutron'],
+    );
+    assert.deepEqual(
+      model.parts.map((p) => p.group.children[0].count),
+      counts,
+    );
+    model.root.traverse((o) => {
+      if (o instanceof T.Mesh) {
+        o.geometry.dispose();
+        o.material.dispose();
+      }
+    });
+  }
+});
+test('The final close-ups show the correct valence content of both nucleons', () => {
+  const core = resolveDetailPath('fusion', [
+    'plasma',
+    'fuel-ions',
+    'deuterium',
+  ]).at(-1);
+  const flavors = (node) =>
+    node.children
+      .filter((n) => n.shape === 'quark')
+      .map((n) => n.name.split(' ')[0]);
+  assert.deepEqual(flavors(core.children[0]), ['Up', 'Up', 'Down']);
+  assert.deepEqual(flavors(core.children[1]), ['Up', 'Down', 'Down']);
+  assert.ok(
+    core.children.every((n) => n.children.some((c) => c.shape === 'gluons')),
+  );
+});
+
+test('Hardware views retain the pellet and plasma exterior until the particle chapter', () => {
+  for (const kind of ['fission', 'fusion']) {
+    for (const level of depthRoute(kind).filter((level) => level.overview)) {
+      const model = createDetailModel(level.node, true);
+      assert.deepEqual(
+        model.parts.map((p) => p.id),
+        [level.node.id],
+      );
+      model.root.traverse((o) => {
+        if (o instanceof T.Mesh) {
+          o.geometry.dispose();
+          o.material.dispose();
+        }
+      });
+    }
+  }
 });

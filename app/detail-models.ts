@@ -42,6 +42,7 @@ function nucleons(
   n: number,
   center = [0, 0, 0],
   size = 1,
+  species?: 'proton' | 'neutron',
 ) {
   const count = p + n,
     positions: number[][] = [];
@@ -60,13 +61,15 @@ function nucleons(
       metalness: 0.2,
       roughness: 0.35,
     }),
-    count,
+    species === 'proton' ? p : species === 'neutron' ? n : count,
   );
   const transform = new T.Matrix4();
-  let protons = 0;
+  let protons = 0,
+    outputIndex = 0;
   for (let i = 0; i < count; i++) {
     const isProton = Math.floor(((i + 1) * p) / count) > protons;
     if (isProton) protons++;
+    if (species && isProton !== (species === 'proton')) continue;
     transform.makeTranslation(
       ...(positions[i].map((v, j) => v * size + center[j]) as [
         number,
@@ -74,15 +77,41 @@ function nucleons(
         number,
       ]),
     );
-    instances.setMatrixAt(i, transform);
-    instances.setColorAt(i, new T.Color(isProton ? '#eb8553' : '#577c96'));
+    instances.setMatrixAt(outputIndex, transform);
+    instances.setColorAt(
+      outputIndex++,
+      new T.Color(isProton ? '#eb8553' : '#577c96'),
+    );
   }
   instances.instanceMatrix.needsUpdate = true;
   if (instances.instanceColor) instances.instanceColor.needsUpdate = true;
   g.add(instances);
 }
 function shape(g: T.Group, type: DetailShape, color: string) {
-  if (type === 'bundle') {
+  if (type === 'quark' || type === 'proton' || type === 'neutron') {
+    add(g, new T.SphereGeometry(type === 'quark' ? 0.45 : 1, 28, 20), color);
+  } else if (type === 'gluons') {
+    const corners = [
+      new T.Vector3(-1, 0.7, 0),
+      new T.Vector3(1, 0.7, 0),
+      new T.Vector3(0, -0.9, 0),
+    ];
+    for (let edge = 0; edge < 3; edge++) {
+      const points: T.Vector3[] = [];
+      for (let i = 0; i <= 70; i++) {
+        const t = i / 70,
+          p = corners[edge].clone().lerp(corners[(edge + 1) % 3], t);
+        p.z += Math.sin(t * Math.PI * 12) * 0.15;
+        p.y += Math.cos(t * Math.PI * 12) * 0.09;
+        points.push(p);
+      }
+      add(
+        g,
+        new T.TubeGeometry(new T.CatmullRomCurve3(points), 70, 0.035, 8, false),
+        color,
+      );
+    }
+  } else if (type === 'bundle') {
     for (let x = -2; x <= 2; x++)
       for (let z = -2; z <= 2; z++)
         cylinder(g, 0.095, 4.3, color, [x * 0.4, 0, z * 0.4]);
@@ -295,18 +324,41 @@ function shape(g: T.Group, type: DetailShape, color: string) {
     cylinder(g, 0.6, 0.2, color, [0, 0.8, 0]);
   }
 }
-export function createDetailModel(node: DetailNode): Machine {
+export function createDetailModel(node: DetailNode, overview = false): Machine {
   const root = new T.Group(),
     parts: ModelPart[] = [];
-  const children = node.children.length ? node.children : [node];
+  if (node.shape === 'proton' || node.shape === 'neutron')
+    root.scale.setScalar(1.8);
+  const children = node.children.length && !overview ? node.children : [node];
   for (const child of children) {
     const group = new T.Group();
     root.add(group);
-    const terminal = !node.children.length;
+    const terminal = !node.children.length || overview;
     group.position.set(
       ...((terminal ? [0, 0, 0] : child.position) as [number, number, number]),
     );
-    shape(group, child.shape, child.color);
+    const composition =
+      node.shape === 'uranium'
+        ? [92, 143, 1.4]
+        : node.shape === 'deuterium'
+          ? [1, 1, 3.6]
+          : node.shape === 'tritium'
+            ? [1, 2, 3.6]
+            : null;
+    if (
+      composition &&
+      !terminal &&
+      (child.id === 'proton' || child.id === 'neutron')
+    ) {
+      nucleons(
+        group,
+        composition[0],
+        composition[1],
+        [0, 0, 0],
+        composition[2],
+        child.id,
+      );
+    } else shape(group, child.shape, child.color);
     group.traverse((o) => {
       o.userData.partId = child.id;
     });

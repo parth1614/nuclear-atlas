@@ -2180,3 +2180,71 @@ footer button {
     bottom: 220px;
   }
 }
+.dissection-phases {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 5px;
+  margin: 10px 0 2px;
+}
+.dissection-phases button {
+  border: 1px solid #d9e4e7;
+  border-radius: 6px;
+  padding: 5px 4px;
+  font-size: 12px;
+  color: #58717d;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dissection-phases button[aria-current='step'] {
+  color: var(--signal);
+  background: #edf3f4;
+  border-color: currentColor;
+}
+.depth-transport .transport-top {
+  min-height: 54px;
+}
+.depth-transport .transport-top > div {
+  min-width: 0;
+}
+.depth-transport .transport-top .eyebrow {
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.depth-transport h2 {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.depth-navigation {
+  min-height: 32px;
+}
+@media (min-width: 801px) {
+  .has-depth-control .deep-workbench > .three-stage {
+    bottom: 260px;
+  }
+}
+@media (max-width: 800px) {
+  .has-depth-control {
+    padding-bottom: 240px;
+  }
+  .depth-transport .transport-top {
+    min-height: 44px;
+  }
+  .dissection-phases {
+    margin-top: 5px;
+  }
+  .dissection-phases button {
+    font-size: 12px;
+  }
+}
+
+@media (max-width: 800px) {
+  .has-depth-control .workbench > .three-stage {
+    height: clamp(180px, calc(100svh - 650px), 330px);
+  }
+  .has-depth-control .deep-workbench > .three-stage {
+    height: clamp(190px, calc(100svh - 610px), 330px);
+  }
+}

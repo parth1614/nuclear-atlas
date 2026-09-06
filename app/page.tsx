@@ -38,7 +38,13 @@ import {
 } from '@/components/ui/dialog';
 import ReactorScene from './reactor-scene';
 import DeepExplorer from './deep-explorer';
-import { DETAIL_ROOTS, depthRoute, depthSample } from './detail-data';
+import {
+  DETAIL_ROOTS,
+  depthRoute,
+  depthSample,
+  depthForPath,
+  DISSECTION_PHASES,
+} from './detail-data';
 import {
   PARTS,
   STAGES,
@@ -75,26 +81,20 @@ export default function Home() {
     [mobileParts, setMobileParts] = useState(false);
   const [detailPath, setDetailPath] = useState<string[]>([]);
   const [depth, setDepth] = useState(0);
-  const [preferredPath, setPreferredPath] = useState<string[]>([]);
-  const route = depthRoute(kind, preferredPath);
+  const route = depthRoute(kind);
   const depthState = depthSample(route, depth);
   const dissecting = mode === 'dissect' && !compare && view === 'machine';
-  const seekDepth = (value: number, preferred = preferredPath) => {
-    const sample = depthSample(depthRoute(kind, preferred), value);
+  const seekDepth = (value: number) => {
+    const sample = depthSample(route, value);
     setPlaying(false);
     setDepth(sample.depth);
     setExplode(sample.separation);
     setDetailPath(sample.path);
-    setPreferredPath(preferred);
   };
   const navigateDepth = (path: string[]) => {
     setMode('dissect');
     setView('machine');
-    const nextRoute = depthRoute(kind, path);
-    seekDepth(
-      (path.length / nextRoute.length) * 100 + (path.length ? 1 : 0),
-      path,
-    );
+    seekDepth(depthForPath(kind, path));
   };
   const [pullParts, setPullParts] = useState(true);
   const stage = STAGES[kind][stageIndex(progress)];
@@ -150,7 +150,6 @@ export default function Home() {
     setPlaying(false);
     setDetailPath([]);
     setDepth(0);
-    setPreferredPath([]);
     setSelected(null);
     setHidden([]);
     setIsolated(false);
@@ -175,7 +174,6 @@ export default function Home() {
     setMode(next);
     setDetailPath([]);
     setDepth(0);
-    setPreferredPath([]);
     setPlaying(false);
     setSelected(null);
     setIsolated(false);
@@ -198,7 +196,6 @@ export default function Home() {
     setPlaying(false);
     setFollow(false);
     setSelected(id);
-    if (dissecting) seekDepth(explode / depthRoute(kind, [id]).length, [id]);
     setHidden((h) => h.filter((x) => x !== id));
     setMobileParts(false);
   };
@@ -310,7 +307,7 @@ export default function Home() {
         name: 'explore_nuclear_atlas',
         title: 'Explore a nuclear process',
         description:
-          'Select fission or fusion, choose a component branch, and set dissection depth from whole reactor (0) to the innermost modeled layer (100). Updates the visible model and pauses playback.',
+          'Select fission or fusion, jump to a component, and scrub the full dissection sequence: whole machine (0–15), all eight components in order (15–75), then atoms, nuclei and quarks (75–100). Updates the visible model and pauses playback.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -353,13 +350,14 @@ export default function Home() {
             changeKind(k);
             setMode('dissect');
             setView('machine');
-            const preferred =
-              typeof d.component === 'string' ? [d.component] : [];
+            const start =
+              typeof d.component === 'string'
+                ? depthForPath(k, [d.component])
+                : 0;
             const sample = depthSample(
-              depthRoute(k, preferred),
-              typeof d.separation === 'number' ? d.separation : 0,
+              depthRoute(k),
+              typeof d.separation === 'number' ? d.separation : start,
             );
-            setPreferredPath(preferred);
             setDepth(sample.depth);
             setDetailPath(sample.path);
             setExplode(sample.separation);
@@ -470,6 +468,8 @@ export default function Home() {
             kind={kind}
             path={detailPath}
             separation={depthState.separation}
+            overview={depthState.overview}
+            phase={depthState.phase}
             onNavigate={navigateDepth}
             onExit={() => seekDepth(0)}
             onReaction={openCoreReaction}
@@ -1018,8 +1018,11 @@ export default function Home() {
             <div className="transport-top">
               <div>
                 <span className="eyebrow">
-                  REACTOR TO CORE · LEVEL {depthState.index} OF{' '}
-                  {route.length - 1}
+                  {depthState.phase === 'machine'
+                    ? '01 / SEPARATE THE WHOLE MACHINE'
+                    : depthState.phase === 'components'
+                      ? `02 / COMPONENT ${(depthState.systemIndex ?? 0) + 1} OF 8 · ${depthState.systemLabel}`
+                      : '03 / ATOMS, NUCLEI & QUARKS'}
                 </span>
                 <h2>{depthState.label}</h2>
               </div>
@@ -1028,6 +1031,19 @@ export default function Home() {
                 <small>%</small>
               </span>
             </div>
+            <div className="dissection-phases" aria-label="Dissection chapters">
+              {DISSECTION_PHASES.map((phase) => (
+                <button
+                  key={phase.id}
+                  aria-current={
+                    depthState.phase === phase.id ? 'step' : undefined
+                  }
+                  onClick={() => seekDepth(phase.start)}
+                >
+                  {phase.label}
+                </button>
+              ))}
+            </div>
             <input
               className="depth-range"
               type="range"
@@ -1035,39 +1051,36 @@ export default function Home() {
               max="100"
               step="0.1"
               aria-label="Dissection depth"
-              aria-valuetext={`${depthState.label}, level ${depthState.index} of ${route.length - 1}`}
+              aria-valuetext={`${depthState.phase}: ${depthState.label}, step ${depthState.index + 1} of ${route.length}`}
               value={depth}
               onChange={(e) => seekDepth(Number(e.target.value))}
             />
             <div className="range-labels">
               <span>Whole reactor</span>
-              <span>{route.at(-1)?.label}</span>
+              <span>Quarks & gluons</span>
             </div>
             <div className="depth-navigation">
               <button
                 className="depth-back"
                 disabled={depth === 0}
                 onClick={() =>
-                  seekDepth(
-                    Math.max(
-                      0,
-                      ((depthState.index - 1) / route.length) * 100 +
-                        (depthState.index > 1 ? 1 : 0),
-                    ),
-                  )
+                  seekDepth(route[Math.max(0, depthState.index - 1)].start)
                 }
               >
                 ← Back a layer
               </button>
               {depthState.index < route.length - 1 ? (
                 <button
-                  onClick={() =>
-                    seekDepth(((depthState.index + 1) / route.length) * 100 + 1)
-                  }
+                  onClick={() => seekDepth(route[depthState.index + 1].start)}
                 >
-                  Next: {route[depthState.index + 1].label} →
+                  {route[depthState.index + 1].systemIndex !==
+                    depthState.systemIndex &&
+                  route[depthState.index + 1].phase === 'components'
+                    ? 'Next component'
+                    : 'Next'}
+                  : {route[depthState.index + 1].label} →
                 </button>
-              ) : depthState.node?.reaction ? (
+              ) : depthState.phase === 'particles' ? (
                 <button onClick={openCoreReaction}>
                   See the {kind} reaction →
                 </button>

@@ -41,6 +41,16 @@ export const SOURCES = [
     publisher: 'U.S. Nuclear Regulatory Commission',
     url: 'https://www.nrc.gov/reading-rm/basic-ref/students/science-101/how-does-nuclear-power-plant-make-electricity',
   },
+  {
+    title: 'Inside protons and neutrons',
+    publisher: 'U.S. Department of Energy',
+    url: 'https://www.energy.gov/science/doe-explainsprotons',
+  },
+  {
+    title: 'Quarks and gluons',
+    publisher: 'U.S. Department of Energy',
+    url: 'https://www.energy.gov/science/doe-explainsquarks-and-gluons',
+  },
 ];
 export const PARTS: Record<Kind, Part[]> = {
   fission: [

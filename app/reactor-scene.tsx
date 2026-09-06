@@ -24,6 +24,7 @@ export type SceneProps = {
   onSelect?: (id: string) => void;
   compact?: boolean;
   detailNode?: DetailNode;
+  overview?: boolean;
   dragToOpen?: boolean;
   enterable?: string[];
   onDive?: (id: string) => void;
@@ -34,7 +35,13 @@ export default function ReactorScene(props: SceneProps) {
   useLayoutEffect(() => {
     current.current = props;
   }, [props]);
-  const { kind, view = 'machine', compact = false, detailNode } = props;
+  const {
+    kind,
+    view = 'machine',
+    compact = false,
+    detailNode,
+    overview = false,
+  } = props;
   useEffect(() => {
     const host = mount.current;
     if (!host) return;
@@ -78,7 +85,7 @@ export default function ReactorScene(props: SceneProps) {
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute(
       'aria-label',
-      `${kind} ${view} model. Arrow keys rotate, plus and minus zoom. Select parts using the component list.`,
+      `${detailNode ? detailNode.name + ' close-up' : kind + ' ' + view + ' model'}. Arrow keys rotate, plus and minus zoom. Select parts using the component list.`,
     );
     host.appendChild(renderer.domElement);
     const contextLost = (e: Event) => {
@@ -115,7 +122,7 @@ export default function ReactorScene(props: SceneProps) {
     fill.position.set(-8, 2, -6);
     scene.add(fill);
     const machine = detailNode
-      ? createDetailModel(detailNode)
+      ? createDetailModel(detailNode, overview)
       : view === 'machine'
         ? createMachine(kind)
         : null;
@@ -161,7 +168,7 @@ export default function ReactorScene(props: SceneProps) {
       b.className = 'model-label';
       b.textContent =
         (detailNode
-          ? detailNode.children.length
+          ? detailNode.children.length && !overview
             ? detailNode.children
             : [detailNode]
           : PARTS[kind]
@@ -201,7 +208,7 @@ export default function ReactorScene(props: SceneProps) {
       const horizontalFit = 1 / Math.min(1, camera.aspect);
       const dist =
         (detailNode
-          ? detailNode.children.length
+          ? detailNode.children.length && !overview
             ? 17
             : 11
           : view === 'machine'
@@ -490,7 +497,7 @@ export default function ReactorScene(props: SceneProps) {
       renderer.dispose();
       host.replaceChildren();
     };
-  }, [kind, view, compact, detailNode]);
+  }, [kind, view, compact, detailNode, overview]);
   return (
     <div className={`three-stage ${compact ? 'compact' : ''}`} ref={mount} />
   );

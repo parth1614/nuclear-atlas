@@ -30,7 +30,11 @@ export type DetailShape =
   | 'blanket'
   | 'divertor'
   | 'absorber'
-  | 'spring';
+  | 'spring'
+  | 'proton'
+  | 'neutron'
+  | 'quark'
+  | 'gluons';
 export type DetailNode = {
   id: string;
   name: string;
@@ -76,12 +80,67 @@ function n(
     ...options,
   };
 }
+const particleSource = 'https://www.energy.gov/science/doe-explainsprotons';
+function nucleon(id: 'proton' | 'neutron'): DetailNode {
+  const flavors =
+    id === 'proton' ? ['up', 'up', 'down'] : ['up', 'down', 'down'];
+  return n(
+    id,
+    id === 'proton' ? 'Protons' : 'Neutrons',
+    id,
+    `Look inside one representative ${id}. Its valence content is ${id === 'proton' ? 'two up quarks and one down quark' : 'one up quark and two down quarks'}. Gluons and a sea of quark–antiquark pairs also contribute. The layout is schematic: quarks remain confined, and reactor reactions do not pull them out.`,
+    [
+      ...flavors.map((flavor, i) =>
+        n(
+          `quark-${i + 1}`,
+          `${flavor === 'up' ? 'Up' : 'Down'} quark · ${i + 1}`,
+          'quark',
+          `A ${flavor} valence quark inside this ${id}. Quarks have no known smaller constituents. These spheres and their colors are symbols, not literal sizes, positions, or color charges.`,
+          [],
+          {
+            scale: 'SUBNUCLEAR SCALE',
+            color: flavor === 'up' ? '#d77d49' : '#568aab',
+            position: [
+              [-1, 0.7, 0],
+              [1, 0.7, 0],
+              [0, -0.9, 0],
+            ][i] as [number, number, number],
+            offset: [0, 0, 0],
+            source: particleSource,
+          },
+        ),
+      ),
+      n(
+        'gluons',
+        'Gluon field & quark sea',
+        'gluons',
+        'Gluons carry the strong interaction between quarks. Curved lines symbolize the field; this is not a literal set of springs. Sea quarks and antiquarks are not individually counted in this simple valence diagram.',
+        [],
+        {
+          scale: 'SUBNUCLEAR SCALE',
+          color: colors.cyan,
+          offset: [0, 0, 0],
+          source:
+            'https://www.energy.gov/science/doe-explainsquarks-and-gluons',
+        },
+      ),
+    ],
+    {
+      scale: 'SUBNUCLEAR SCALE',
+      color: id === 'proton' ? colors.fuel : colors.water,
+      offset: [id === 'proton' ? -2.1 : 2.1, 0, 0],
+      source: particleSource,
+    },
+  );
+}
+const proton = nucleon('proton'),
+  neutron = nucleon('neutron');
 const uraniumCore = n(
   'nucleus',
   'Uranium-235 nucleus',
   'uranium',
-  '92 protons and 143 neutrons form this U-235 nucleus. A captured neutron can initiate fission. These spheres represent nucleons; their positions are illustrative.',
-  [],
+  '92 protons and 143 neutrons form this U-235 nucleus. Separate the two populations, then inspect one representative proton or neutron. This conceptual view is not a fission event; use the reaction player to see fission.',
+  [proton, neutron],
   { scale: 'NUCLEAR SCALE', color: colors.fuel, reaction: true },
 );
 const uraniumAtom = n(
@@ -535,8 +594,8 @@ const deuterium = n(
   'deuterium',
   'Deuterium nucleus',
   'deuterium',
-  'One proton and one neutron form a deuterium nucleus. In a fully ionized fusion plasma it is not surrounded by a bound electron.',
-  [],
+  'One proton and one neutron form a deuterium nucleus. In a fully ionized fusion plasma it is not surrounded by a bound electron. Separate the nucleons to inspect their internal structure.',
+  [proton, neutron],
   {
     scale: 'NUCLEAR SCALE',
     color: colors.cyan,
@@ -549,8 +608,8 @@ const tritium = n(
   'tritium',
   'Tritium nucleus',
   'tritium',
-  'One proton and two neutrons form a tritium nucleus. Fusion with deuterium can produce helium-4 and a neutron.',
-  [],
+  'One proton and two neutrons form a tritium nucleus. Separate its nucleons, or open the reaction player to see fusion with deuterium.',
+  [proton, neutron],
   {
     scale: 'NUCLEAR SCALE',
     color: colors.fuel,
@@ -803,51 +862,128 @@ export function dragCompletion(dx: number, dy: number) {
   return Math.min(1, Math.hypot(dx, dy) / 90);
 }
 
+export type DissectionPhase = 'machine' | 'components' | 'particles';
 export interface DepthLevel {
   path: string[];
   label: string;
   node?: DetailNode;
+  phase: DissectionPhase;
+  start: number;
+  end: number;
+  systemIndex?: number;
+  systemLabel?: string;
+  overview?: boolean;
 }
-// The fuel path is the default; choosing hardware follows that component instead.
-export function depthRoute(kind: Kind, preferred: string[] = []): DepthLevel[] {
-  const route: DepthLevel[] = [{ path: [], label: 'Whole reactor' }];
-  const defaults: Record<string, string> = {
-    'fuel-rods': 'pellets',
-    crystal: 'uranium-atom',
-    'uranium-atom': 'nucleus',
-    plasma: 'fuel-ions',
-    'fuel-ions': 'deuterium',
-    generator: 'stator',
-    vessel: kind === 'fission' ? 'fuel' : 'plasma',
-  };
-  let choices = DETAIL_ROOTS[kind];
-  let path: string[] = [];
-  while (choices.length) {
-    const preferredId =
-      preferred[path.length] ??
-      (path.length === 0
-        ? kind === 'fission'
-          ? 'fuel'
-          : 'plasma'
-        : defaults[path.at(-1)!]);
-    const node =
-      choices.find((n) => n.id === preferredId) ??
-      choices.find((n) => canEnter(n)) ??
-      choices[0];
-    path = [...path, node.id];
-    route.push({ path, label: node.name, node });
-    choices = node.children;
-  }
+export const DISSECTION_PHASES = [
+  { id: 'machine', label: 'Machine', start: 0 },
+  { id: 'components', label: '8 components', start: 15 },
+  { id: 'particles', label: 'Particles', start: 75 },
+] as const;
+const particleScale = (node: DetailNode) =>
+  [
+    'ATOMIC SCALE',
+    'NUCLEAR SCALE',
+    'PARTICLE SCALE',
+    'SUBNUCLEAR SCALE',
+  ].includes(node.scale);
+// A fixed itinerary: selecting a part never replaces the remaining machine tour.
+export function depthRoute(kind: Kind): DepthLevel[] {
+  const route: DepthLevel[] = [
+    { path: [], label: 'Whole reactor', phase: 'machine', start: 0, end: 15 },
+  ];
+  const roots = DETAIL_ROOTS[kind];
+  const rootIds = new Set(roots.map((n) => n.id));
+  roots.forEach((root, systemIndex) => {
+    const levels: Omit<DepthLevel, 'start' | 'end'>[] = [];
+    const visit = (node: DetailNode, path: string[]) => {
+      if (particleScale(node) || (path.length > 1 && rootIds.has(node.id)))
+        return;
+      levels.push({
+        path,
+        label: node.name,
+        node,
+        phase: 'components',
+        systemIndex,
+        systemLabel: root.name,
+        overview:
+          node.children.length > 0 && node.children.every(particleScale),
+      });
+      node.children.forEach((child) => visit(child, [...path, child.id]));
+    };
+    visit(root, [root.id]);
+    const start = 15 + systemIndex * 7.5;
+    levels.forEach((level, i) =>
+      route.push({
+        ...level,
+        start: start + (i / levels.length) * 7.5,
+        end: start + ((i + 1) / levels.length) * 7.5,
+      }),
+    );
+  });
+  const crystal = ['fuel', 'fuel-rods', 'pellets', 'pellet', 'crystal'];
+  const atom = [...crystal, 'uranium-atom'];
+  const nuclei = ['plasma', 'fuel-ions'];
+  const paths =
+    kind === 'fission'
+      ? [
+          crystal,
+          [...crystal, 'oxygen-sites'],
+          atom,
+          [...atom, 'electron-cloud'],
+          [...atom, 'nucleus'],
+          [...atom, 'nucleus', 'proton'],
+          [...atom, 'nucleus', 'neutron'],
+        ]
+      : [
+          ['plasma', 'free-electrons'],
+          nuclei,
+          [...nuclei, 'deuterium'],
+          [...nuclei, 'tritium'],
+          [...nuclei, 'deuterium', 'proton'],
+          [...nuclei, 'tritium', 'neutron'],
+        ];
+  paths.forEach((path, i) => {
+    const node = resolveDetailPath(kind, path).at(-1)!;
+    route.push({
+      path,
+      node,
+      label:
+        node.shape === 'proton'
+          ? 'Inside a proton · quarks'
+          : node.shape === 'neutron'
+            ? 'Inside a neutron · quarks'
+            : node.name,
+      phase: 'particles',
+      start: 75 + (i / paths.length) * 25,
+      end: 75 + ((i + 1) / paths.length) * 25,
+    });
+  });
   return route;
 }
 export function depthSample(route: DepthLevel[], value: number) {
   const depth = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-  const position = (depth / 100) * route.length;
-  const index = Math.min(route.length - 1, Math.floor(position));
-  return {
-    ...route[index],
-    index,
-    depth,
-    separation: Math.min(100, (position - index) * 100),
-  };
+  const found = route.findIndex(
+    (level) => depth >= level.start && depth < level.end,
+  );
+  const index = found < 0 ? route.length - 1 : found;
+  const level = route[index];
+  // Finish opening each view before crossing to the next one.
+  const separation = Math.min(
+    100,
+    ((depth - level.start) / (level.end - level.start)) * 125,
+  );
+  return { ...level, index, depth, separation };
+}
+export function depthForPath(kind: Kind, path: string[]) {
+  const route = depthRoute(kind);
+  const chain = resolveDetailPath(kind, path);
+  for (let length = path.length; length > 0; length--) {
+    const exact = route.find(
+      (level) => level.path.join('/') === path.slice(0, length).join('/'),
+    );
+    const canonical =
+      exact ?? route.find((level) => level.node === chain[length - 1]);
+    if (canonical) return canonical.start;
+  }
+  return 0;
 }

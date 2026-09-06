@@ -24,7 +24,11 @@ export default function DeepExplorer({
   onExit,
   onReaction,
   separation,
+  overview = false,
+  phase,
 }: {
+  overview?: boolean;
+  phase: 'machine' | 'components' | 'particles';
   separation: number;
   kind: Kind;
   path: string[];
@@ -36,7 +40,7 @@ export default function DeepExplorer({
     node = chain.at(-1)!;
   const [selected, setSelected] = useState<string | null>(null),
     [isolated, setIsolated] = useState(false),
-    [pull, setPull] = useState(true),
+    [pull, setPull] = useState(node?.scale !== 'SUBNUCLEAR SCALE'),
     [labels, setLabels] = useState(false),
     [reset, setReset] = useState(0);
   if (!node)
@@ -93,11 +97,19 @@ export default function DeepExplorer({
         <p className="eyebrow">
           LAYER {chain.length} / {node.scale}
         </p>
-        <h1>Inside {node.name.toLowerCase()}.</h1>
+        <h1>
+          {node.shape === 'proton'
+            ? 'Inside a proton.'
+            : node.shape === 'neutron'
+              ? 'Inside a neutron.'
+              : `Inside ${node.name.toLowerCase()}.`}
+        </h1>
         <p>
-          {node.children.length
-            ? 'Keep dragging the depth slider, or pull a part to choose a different path.'
-            : 'You’ve reached the innermost modeled layer.'}
+          {phase === 'components'
+            ? 'Keep dragging to open every component in order. The atomic close-up comes after all eight systems.'
+            : node.scale === 'SUBNUCLEAR SCALE'
+              ? 'Valence quarks and the strong interaction · A schematic view inside one nucleon.'
+              : 'Keep dragging inward, from matter to its smaller constituents.'}
         </p>
       </div>
       <div className="deep-tools">
@@ -106,7 +118,10 @@ export default function DeepExplorer({
           onValueChange={(v) => setPull(v === 'pull')}
         >
           <TabsList aria-label="Drag behavior">
-            <TabsTrigger value="pull">
+            <TabsTrigger
+              value="pull"
+              disabled={node.scale === 'SUBNUCLEAR SCALE'}
+            >
               <MousePointer2 />
               Pull apart
             </TabsTrigger>
@@ -135,6 +150,7 @@ export default function DeepExplorer({
       <ReactorScene
         kind={kind}
         detailNode={node}
+        overview={overview}
         explode={separation}
         selected={selected}
         isolated={isolated}
@@ -149,7 +165,7 @@ export default function DeepExplorer({
         <div className="panel-heading">
           <Layers3 size={16} />
           <strong>
-            {node.children.length ? 'Nested components' : 'At the core'}
+            {node.children.length ? 'Nested components' : 'Component close-up'}
           </strong>
         </div>
         <div className="deep-part-list">
@@ -164,11 +180,14 @@ export default function DeepExplorer({
                 <span>
                   {p.name}
                   <small>
-                    {p.children.length
-                      ? `${p.children.length} inner components`
-                      : p.reaction
-                        ? 'Nuclear close-up'
-                        : 'Last modeled layer'}
+                    {['uranium', 'deuterium', 'tritium'].includes(node.shape) &&
+                    ['proton', 'neutron'].includes(p.id)
+                      ? `${node.shape === 'uranium' ? (p.id === 'proton' ? 92 : 143) : p.id === 'proton' ? 1 : node.shape === 'tritium' ? 2 : 1} in this nucleus · inspect one`
+                      : p.children.length
+                        ? `${p.children.length} inner components`
+                        : p.reaction
+                          ? 'Nuclear close-up'
+                          : 'Last modeled layer'}
                   </small>
                 </span>
               </button>
@@ -187,8 +206,8 @@ export default function DeepExplorer({
         </div>
         <p className="deep-list-hint">
           {node.children.length
-            ? 'You can also select a part, then choose “Explore inside.”'
-            : 'Change levels using the path above.'}
+            ? 'Select a piece to inspect it, or keep dragging through the full tour.'
+            : 'Keep dragging to continue to the next component.'}
         </p>
       </aside>
       <aside className="deep-reading glass" aria-live="polite">
@@ -205,7 +224,7 @@ export default function DeepExplorer({
             <ArrowRight size={16} />
           </button>
         )}
-        {node.reaction && (
+        {(node.reaction || node.scale === 'SUBNUCLEAR SCALE') && (
           <button className="primary-button" onClick={onReaction}>
             <Atom size={16} />
             See the {kind} reaction
