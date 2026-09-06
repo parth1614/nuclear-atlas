@@ -5,6 +5,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createMachine, createReaction } from './scene-models';
 import { PARTS, type Kind, type View } from './atlas-data';
+import { createDetailModel } from './detail-models';
+import { dragCompletion, type DetailNode } from './detail-data';
 export type SceneProps = {
   kind: Kind;
   explode: number;
@@ -21,6 +23,10 @@ export type SceneProps = {
   reset?: number;
   onSelect?: (id: string) => void;
   compact?: boolean;
+  detailNode?: DetailNode;
+  dragToOpen?: boolean;
+  enterable?: string[];
+  onDive?: (id: string) => void;
 };
 export default function ReactorScene(props: SceneProps) {
   const mount = useRef<HTMLDivElement>(null);
@@ -28,7 +34,7 @@ export default function ReactorScene(props: SceneProps) {
   useLayoutEffect(() => {
     current.current = props;
   }, [props]);
-  const { kind, view = 'machine', compact = false } = props;
+  const { kind, view = 'machine', compact = false, detailNode } = props;
   useEffect(() => {
     const host = mount.current;
     if (!host) return;
@@ -68,7 +74,7 @@ export default function ReactorScene(props: SceneProps) {
     renderer.toneMapping = T.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.12;
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = T.PCFSoftShadowMap;
+    renderer.shadowMap.type = T.PCFShadowMap;
     renderer.domElement.tabIndex = 0;
     renderer.domElement.setAttribute(
       'aria-label',
@@ -108,11 +114,16 @@ export default function ReactorScene(props: SceneProps) {
     const fill = new T.DirectionalLight(0xcfe8f6, 1.3);
     fill.position.set(-8, 2, -6);
     scene.add(fill);
-    const machine = view === 'machine' ? createMachine(kind) : null;
-    const reaction = view === 'nucleus' ? createReaction(kind) : null;
+    const machine = detailNode
+      ? createDetailModel(detailNode)
+      : view === 'machine'
+        ? createMachine(kind)
+        : null;
+    const reaction =
+      !detailNode && view === 'nucleus' ? createReaction(kind) : null;
     const root = machine?.root ?? reaction!.root;
     scene.add(root);
-    const floorY = kind === 'fission' ? -3.3 : -3.2;
+    const floorY = detailNode ? -5.6 : kind === 'fission' ? -3.3 : -3.2;
     const floor = new T.Mesh(
       new T.PlaneGeometry(50, 50),
       new T.ShadowMaterial({ color: 0x506b79, opacity: 0.12 }),
@@ -148,7 +159,13 @@ export default function ReactorScene(props: SceneProps) {
     const labels = (machine?.parts ?? []).map((p) => {
       const b = document.createElement('button');
       b.className = 'model-label';
-      b.textContent = PARTS[kind].find((x) => x.id === p.id)?.name ?? p.id;
+      b.textContent =
+        (detailNode
+          ? detailNode.children.length
+            ? detailNode.children
+            : [detailNode]
+          : PARTS[kind]
+        ).find((x) => x.id === p.id)?.name ?? p.id;
       b.addEventListener('click', () => current.current.onSelect?.(p.id));
       labelRoot.appendChild(b);
       return { part: p, element: b };
@@ -182,11 +199,18 @@ export default function ReactorScene(props: SceneProps) {
         h = host!.clientHeight;
       camera.aspect = w / Math.max(h, 1);
       const horizontalFit = 1 / Math.min(1, camera.aspect);
-      const dist = (view === 'machine' ? 22 : 13) * horizontalFit;
+      const dist =
+        (detailNode
+          ? detailNode.children.length
+            ? 17
+            : 11
+          : view === 'machine'
+            ? 22
+            : 13) * horizontalFit;
       const mode = current.current.cameraView ?? 'perspective';
       const target = new T.Vector3(
-        view === 'machine' ? 0.3 : 0,
-        view === 'machine' ? -0.3 : 0,
+        !detailNode && view === 'machine' ? 0.3 : 0,
+        !detailNode && view === 'machine' ? -0.3 : 0,
         0,
       );
       controls.target.copy(target);
@@ -211,25 +235,106 @@ export default function ReactorScene(props: SceneProps) {
     const raycaster = new T.Raycaster(),
       pointer = new T.Vector2();
     let down = [0, 0];
-    const onDown = (e: PointerEvent) => {
-      down = [e.clientX, e.clientY];
-    };
-    const onUp = (e: PointerEvent) => {
-      if (!machine || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 5)
-        return;
+    const manualOffsets = new Map<string, T.Vector3>();
+    let grabbed: { id: string; pointerId: number; start: T.Vector3 } | null =
+      null;
+    const dragHint = document.createElement('div');
+    dragHint.className = 'pull-feedback';
+    dragHint.hidden = true;
+    host.appendChild(dragHint);
+    function pick(e: PointerEvent | MouseEvent) {
+      if (!machine) return undefined;
       const r = renderer.domElement.getBoundingClientRect();
       pointer.set(
         ((e.clientX - r.left) / r.width) * 2 - 1,
         (-(e.clientY - r.top) / r.height) * 2 + 1,
       );
       raycaster.setFromCamera(pointer, camera);
-      const visible = machine.parts
-        .filter((p) => p.group.visible)
-        .map((p) => p.group);
       const hit = raycaster
-        .intersectObjects(visible, true)
-        .find((x) => x.object.userData.partId);
-      if (hit) current.current.onSelect?.(hit.object.userData.partId);
+        .intersectObjects(
+          machine.parts.filter((p) => p.group.visible).map((p) => p.group),
+          true,
+        )
+        .find((h) => h.object.userData.partId);
+      return hit?.object.userData.partId as string | undefined;
+    }
+    function mayEnter(id: string) {
+      return current.current.enterable?.includes(id) ?? true;
+    }
+    const onDown = (e: PointerEvent) => {
+      if (e.button !== 0 || !e.isPrimary) return;
+      down = [e.clientX, e.clientY];
+      const id = pick(e);
+      if (id && current.current.dragToOpen) {
+        e.stopImmediatePropagation();
+        controls.enabled = false;
+        renderer.domElement.setPointerCapture(e.pointerId);
+        grabbed = {
+          id,
+          pointerId: e.pointerId,
+          start: manualOffsets.get(id)?.clone() ?? new T.Vector3(),
+        };
+        current.current.onSelect?.(id);
+        renderer.domElement.style.cursor = 'grabbing';
+      }
+    };
+    const onMove = (e: PointerEvent) => {
+      if (!grabbed || e.pointerId !== grabbed.pointerId) return;
+      e.stopImmediatePropagation();
+      const dx = e.clientX - down[0],
+        dy = e.clientY - down[1];
+      const units =
+        (2 *
+          camera.position.distanceTo(controls.target) *
+          Math.tan((camera.fov * Math.PI) / 360)) /
+        Math.max(host.clientHeight, 1);
+      const delta = new T.Vector3(dx * units, -dy * units, 0)
+        .applyQuaternion(camera.quaternion)
+        .applyQuaternion(root.getWorldQuaternion(new T.Quaternion()).invert());
+      manualOffsets.set(grabbed.id, grabbed.start.clone().add(delta));
+      const completion = dragCompletion(dx, dy);
+      dragHint.hidden = Math.hypot(dx, dy) < 5;
+      dragHint.textContent = mayEnter(grabbed.id)
+        ? completion >= 1
+          ? 'Release to explore inside'
+          : 'Keep pulling to explore inside'
+        : 'Move this piece · Reset to reassemble';
+      dragHint.style.setProperty('--pull-progress', `${completion * 100}%`);
+    };
+    const cancelGrab = () => {
+      if (grabbed) manualOffsets.set(grabbed.id, grabbed.start);
+      grabbed = null;
+      controls.enabled = true;
+      dragHint.hidden = true;
+      renderer.domElement.style.cursor = 'grab';
+    };
+    const onUp = (e: PointerEvent) => {
+      const moved = Math.hypot(e.clientX - down[0], e.clientY - down[1]);
+      if (grabbed) {
+        if (e.pointerId !== grabbed.pointerId) return;
+        e.stopImmediatePropagation();
+        const id = grabbed.id;
+        grabbed = null;
+        controls.enabled = true;
+        dragHint.hidden = true;
+        renderer.domElement.style.cursor = 'grab';
+        if (renderer.domElement.hasPointerCapture(e.pointerId))
+          renderer.domElement.releasePointerCapture(e.pointerId);
+        if (
+          dragCompletion(e.clientX - down[0], e.clientY - down[1]) >= 1 &&
+          mayEnter(id)
+        )
+          current.current.onDive?.(id);
+        return;
+      }
+      if (moved <= 5) {
+        const id = pick(e);
+        if (id) current.current.onSelect?.(id);
+      }
+    };
+    const onDoubleClick = (e: MouseEvent) => {
+      const id = pick(e);
+      if (id && mayEnter(id)) current.current.onDive?.(id);
     };
     const keyboard = (e: KeyboardEvent) => {
       if (
@@ -256,8 +361,11 @@ export default function ReactorScene(props: SceneProps) {
         }
       }
     };
-    renderer.domElement.addEventListener('pointerdown', onDown);
-    renderer.domElement.addEventListener('pointerup', onUp);
+    renderer.domElement.addEventListener('pointerdown', onDown, true);
+    renderer.domElement.addEventListener('pointermove', onMove, true);
+    renderer.domElement.addEventListener('pointercancel', cancelGrab);
+    renderer.domElement.addEventListener('dblclick', onDoubleClick);
+    renderer.domElement.addEventListener('pointerup', onUp, true);
     renderer.domElement.addEventListener('keydown', keyboard);
     const render = (now: number) => {
       raf = requestAnimationFrame(render);
@@ -268,6 +376,7 @@ export default function ReactorScene(props: SceneProps) {
         lastReset !== (p.reset ?? 0) ||
         lastCamera !== (p.cameraView ?? 'perspective')
       ) {
+        if (lastReset !== (p.reset ?? 0)) manualOffsets.clear();
         lastReset = p.reset ?? 0;
         lastCamera = p.cameraView ?? 'perspective';
         root.rotation.set(0, 0, 0);
@@ -281,7 +390,8 @@ export default function ReactorScene(props: SceneProps) {
         machine.parts.forEach((part) => {
           part.group.position
             .copy(part.base)
-            .addScaledVector(part.offset, smoothed);
+            .addScaledVector(part.offset, smoothed)
+            .add(manualOffsets.get(part.id) ?? new T.Vector3());
           part.group.visible =
             !(p.hidden ?? []).includes(part.id) &&
             (!p.isolated || part.id === p.selected);
@@ -357,8 +467,11 @@ export default function ReactorScene(props: SceneProps) {
       cancelAnimationFrame(raf);
       ro.disconnect();
       controls.dispose();
-      renderer.domElement.removeEventListener('pointerdown', onDown);
-      renderer.domElement.removeEventListener('pointerup', onUp);
+      renderer.domElement.removeEventListener('pointerdown', onDown, true);
+      renderer.domElement.removeEventListener('pointermove', onMove, true);
+      renderer.domElement.removeEventListener('pointercancel', cancelGrab);
+      renderer.domElement.removeEventListener('dblclick', onDoubleClick);
+      renderer.domElement.removeEventListener('pointerup', onUp, true);
       renderer.domElement.removeEventListener('keydown', keyboard);
       renderer.domElement.removeEventListener('webglcontextlost', contextLost);
       const geometries = new Set<T.BufferGeometry>(),
@@ -377,7 +490,7 @@ export default function ReactorScene(props: SceneProps) {
       renderer.dispose();
       host.replaceChildren();
     };
-  }, [kind, view, compact]);
+  }, [kind, view, compact, detailNode]);
   return (
     <div className={`three-stage ${compact ? 'compact' : ''}`} ref={mount} />
   );

@@ -3,6 +3,7 @@
 A 3D educational explorer for nuclear fission and fusion, inspired by the interaction pattern of [Human Atlas](https://github.com/ashemag/human-atlas).
 
 - Assemble and dissect eight independently selectable systems in each machine.
+- Drill into every system: pull a component to open its internals, or use the labeled buttons. Breadcrumbs provide reversible navigation. Fission reaches fuel pellets, a schematic crystal, a uranium atom, and its nucleus; fusion reaches fuel ions and nuclei, plus magnet windings, cables, strands, and filaments.
 - Inspect, hide, isolate, or label components. Orbit with mouse, touch, or keyboard.
 - Follow five stages from a nuclear reaction to a power cycle with play/pause, seeking, replay, and speed controls.
 - Compare fission and deuterium–tritium fusion on a shared reaction timeline.
@@ -27,7 +28,7 @@ The Three.js models are procedural; no external model downloads or API keys are 
 
 ## Validation
 
-The model checks cover finite geometry and particle transforms, component coverage, flow paths, timeline boundaries, assembly endpoints, and reaction accounting. Type checking and the production build are separate checks.
+The model checks cover finite geometry and particle transforms, component coverage, flow paths, timeline boundaries, assembly endpoints, and reaction accounting. Nested-dissection checks cover branch resolution, core routes, drag thresholds, and finite geometry at every layer. Type checking and the production build are separate checks.
 
 No browser interaction or visual QA was performed in this build. Optional WebMCP tools are feature-detected and register only in supported browsers; a supported validation context was unavailable, so their browser contracts remain unverified.
 
