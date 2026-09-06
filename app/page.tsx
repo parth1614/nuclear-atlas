@@ -38,7 +38,7 @@ import {
 } from '@/components/ui/dialog';
 import ReactorScene from './reactor-scene';
 import DeepExplorer from './deep-explorer';
-import { DETAIL_ROOTS } from './detail-data';
+import { DETAIL_ROOTS, depthRoute, depthSample } from './detail-data';
 import {
   PARTS,
   STAGES,
@@ -56,7 +56,7 @@ export default function Home() {
     [compare, setCompare] = useState(false),
     [mode, setMode] = useState<Mode>('dissect'),
     [view, setView] = useState<View>('machine');
-  const [explode, setExplode] = useState(18),
+  const [explode, setExplode] = useState(0),
     [assembly, setAssembly] = useState(0),
     [progress, setProgress] = useState(0),
     [playing, setPlaying] = useState(false),
@@ -74,6 +74,28 @@ export default function Home() {
     [info, setInfo] = useState(false),
     [mobileParts, setMobileParts] = useState(false);
   const [detailPath, setDetailPath] = useState<string[]>([]);
+  const [depth, setDepth] = useState(0);
+  const [preferredPath, setPreferredPath] = useState<string[]>([]);
+  const route = depthRoute(kind, preferredPath);
+  const depthState = depthSample(route, depth);
+  const dissecting = mode === 'dissect' && !compare && view === 'machine';
+  const seekDepth = (value: number, preferred = preferredPath) => {
+    const sample = depthSample(depthRoute(kind, preferred), value);
+    setPlaying(false);
+    setDepth(sample.depth);
+    setExplode(sample.separation);
+    setDetailPath(sample.path);
+    setPreferredPath(preferred);
+  };
+  const navigateDepth = (path: string[]) => {
+    setMode('dissect');
+    setView('machine');
+    const nextRoute = depthRoute(kind, path);
+    seekDepth(
+      (path.length / nextRoute.length) * 100 + (path.length ? 1 : 0),
+      path,
+    );
+  };
   const [pullParts, setPullParts] = useState(true);
   const stage = STAGES[kind][stageIndex(progress)];
   const part = PARTS[kind].find((p) => p.id === selected);
@@ -92,6 +114,7 @@ export default function Home() {
     hidden,
     isolated,
     detailPath,
+    depth,
   });
   useLayoutEffect(() => {
     runtime.current = {
@@ -106,6 +129,7 @@ export default function Home() {
       hidden,
       isolated,
       detailPath,
+      depth,
     };
   }, [
     kind,
@@ -119,11 +143,14 @@ export default function Home() {
     hidden,
     isolated,
     detailPath,
+    depth,
   ]);
   const stop = () => setPlaying(false);
   const changeKind = useCallback((next: string) => {
     setPlaying(false);
     setDetailPath([]);
+    setDepth(0);
+    setPreferredPath([]);
     setSelected(null);
     setHidden([]);
     setIsolated(false);
@@ -140,12 +167,15 @@ export default function Home() {
       setCompare(false);
       setView('machine');
       setMode('dissect');
-      setExplode(18);
+      setExplode(0);
       setFollow(true);
     }
   }, []);
   const changeMode = (next: Mode) => {
     setMode(next);
+    setDetailPath([]);
+    setDepth(0);
+    setPreferredPath([]);
     setPlaying(false);
     setSelected(null);
     setIsolated(false);
@@ -156,7 +186,7 @@ export default function Home() {
     }
     if (next === 'dissect') {
       setView('machine');
-      setExplode(45);
+      setExplode(0);
     }
     if (next === 'operate') {
       setProgress(0);
@@ -168,6 +198,7 @@ export default function Home() {
     setPlaying(false);
     setFollow(false);
     setSelected(id);
+    if (dissecting) seekDepth(explode / depthRoute(kind, [id]).length, [id]);
     setHidden((h) => h.filter((x) => x !== id));
     setMobileParts(false);
   };
@@ -279,7 +310,7 @@ export default function Home() {
         name: 'explore_nuclear_atlas',
         title: 'Explore a nuclear process',
         description:
-          'Select fission or fusion, inspect a component, and set the dissection amount. Updates the visible model and pauses playback.',
+          'Select fission or fusion, choose a component branch, and set dissection depth from whole reactor (0) to the innermost modeled layer (100). Updates the visible model and pauses playback.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -322,7 +353,16 @@ export default function Home() {
             changeKind(k);
             setMode('dissect');
             setView('machine');
-            setExplode(typeof d.separation === 'number' ? d.separation : 18);
+            const preferred =
+              typeof d.component === 'string' ? [d.component] : [];
+            const sample = depthSample(
+              depthRoute(k, preferred),
+              typeof d.separation === 'number' ? d.separation : 0,
+            );
+            setPreferredPath(preferred);
+            setDepth(sample.depth);
+            setDetailPath(sample.path);
+            setExplode(sample.separation);
             setSelected(typeof d.component === 'string' ? d.component : null);
           });
           return runtime.current;
@@ -351,13 +391,15 @@ export default function Home() {
     setReset((v) => v + 1);
     setProgress(0);
     setAssembly(0);
+    setDepth(0);
+    setDetailPath([]);
     setExplode(0);
     if (operating && follow && !compare) setView('nucleus');
   };
   const openPart = (id: string) => {
     if (!DETAIL_ROOTS[kind].some((node) => node.id === id)) return;
     setPlaying(false);
-    setDetailPath([id]);
+    navigateDepth([id]);
   };
   const openCoreReaction = () => {
     setDetailPath([]);
@@ -419,576 +461,623 @@ export default function Home() {
           <span>About the atlas</span>
         </button>
       </header>
-      {detailPath.length > 0 ? (
-        <DeepExplorer
-          key={kind + detailPath.join('/')}
-          kind={kind}
-          path={detailPath}
-          onNavigate={setDetailPath}
-          onExit={() => setDetailPath([])}
-          onReaction={openCoreReaction}
-        />
-      ) : (
-        <section
-          className={`workbench ${view === 'nucleus' ? 'nucleus-view' : ''}`}
-          aria-label="Interactive nuclear explorer"
-        >
-          <div className="scene-head">
-            <p className="eyebrow">
-              {compare
-                ? 'TWO REACTIONS. ONE CLOSER LOOK.'
-                : kind === 'fission'
-                  ? '01 / SPLITTING THE ATOM'
-                  : '02 / BRINGING NUCLEI TOGETHER'}
-            </p>
-            <h1>
-              {compare
-                ? 'A different kind of energy.'
-                : kind === 'fission'
-                  ? 'From nucleus\nto electricity.'
-                  : 'Fusion, layer\nby layer.'}
-            </h1>
-            <p>
-              {compare
-                ? 'Scrub through both reactions together.'
-                : 'Take it apart. See what makes it work.'}
-            </p>
-          </div>
-          {!compare && (
-            <>
-              <div className="scene-caption">
-                <span className="live-dot" />
-                {kind === 'fission'
-                  ? 'PRESSURIZED WATER REACTOR'
-                  : 'TOKAMAK · CONCEPTUAL POWER PLANT'}
-              </div>
-              <Tabs
-                className="mode-selector"
-                value={mode}
-                onValueChange={(v) => changeMode(v as Mode)}
-              >
-                <TabsList aria-label="Exploration mode">
-                  <TabsTrigger value="assemble">
-                    <Box />
-                    Assemble
-                  </TabsTrigger>
-                  <TabsTrigger value="dissect">
-                    <Scan />
-                    Dissect
-                  </TabsTrigger>
-                  <TabsTrigger value="operate">
-                    <Activity />
-                    Operate
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-              <button
-                className="mobile-parts-button"
-                onClick={() => setMobileParts((v) => !v)}
-              >
-                <Layers3 size={15} />
-                {mobileParts ? 'Close components' : 'Components'}
-              </button>
-            </>
-          )}
-          {compare ? (
-            <div className="comparison-scenes">
-              {(['fission', 'fusion'] as Kind[]).map((k) => (
-                <section className={`comparison-cell ${k}`} key={k}>
-                  <div className="comparison-label">
-                    <span className="eyebrow">
-                      {k === 'fission' ? '01 / FISSION' : '02 / FUSION'}
-                    </span>
-                    <h2>
-                      {k === 'fission'
-                        ? 'One heavy nucleus splits.'
-                        : 'Two light nuclei combine.'}
-                    </h2>
-                  </div>
-                  <ReactorScene
-                    kind={k}
-                    view="nucleus"
-                    explode={0}
-                    progress={progress}
-                    playing={playing}
-                    operating
-                    compact
-                    reset={reset}
-                  />
-                  <div className="equation">
-                    {k === 'fission'
-                      ? '²³⁵U + n → ¹⁴¹Ba + ⁹²Kr + 3n'
-                      : '²H + ³H → ⁴He + n'}
-                    <span>+ energy</span>
-                  </div>
-                </section>
-              ))}
+      <div
+        className={`exploration-surface ${dissecting ? 'has-depth-control' : ''}`}
+      >
+        {detailPath.length > 0 ? (
+          <DeepExplorer
+            key={kind + detailPath.join('/')}
+            kind={kind}
+            path={detailPath}
+            separation={depthState.separation}
+            onNavigate={navigateDepth}
+            onExit={() => seekDepth(0)}
+            onReaction={openCoreReaction}
+          />
+        ) : (
+          <section
+            className={`workbench ${view === 'nucleus' ? 'nucleus-view' : ''}`}
+            aria-label="Interactive nuclear explorer"
+          >
+            <div className="scene-head">
+              <p className="eyebrow">
+                {compare
+                  ? 'TWO REACTIONS. ONE CLOSER LOOK.'
+                  : kind === 'fission'
+                    ? '01 / SPLITTING THE ATOM'
+                    : '02 / BRINGING NUCLEI TOGETHER'}
+              </p>
+              <h1>
+                {compare
+                  ? 'A different kind of energy.'
+                  : kind === 'fission'
+                    ? 'From nucleus\nto electricity.'
+                    : 'Fusion, layer\nby layer.'}
+              </h1>
+              <p>
+                {compare
+                  ? 'Scrub through both reactions together.'
+                  : 'Take it apart. See what makes it work.'}
+              </p>
             </div>
-          ) : (
-            <ReactorScene kind={kind} {...sceneProps} />
-          )}
-          {!compare && view === 'machine' && (
-            <aside
-              className={`layers-panel glass ${mobileParts ? 'mobile-open' : ''}`}
-              aria-label="Model components"
-            >
-              <div className="panel-heading">
-                <Layers3 size={16} />
-                <strong>Inside the machine</strong>
-                <span className="count">08</span>
-              </div>
-              <p className="panel-subtitle">Select a part to look closer.</p>
-              <div className="parts-list">
-                {PARTS[kind].map((p, i) => (
-                  <div
-                    className={`part-row ${selected === p.id ? 'selected' : ''} ${hidden.includes(p.id) ? 'hidden-part' : ''}`}
-                    key={p.id}
-                  >
-                    <button
-                      className="part-select"
-                      onClick={() => selectPart(p.id)}
-                      aria-pressed={selected === p.id}
-                    >
-                      <span className="part-number">0{i + 1}</span>
-                      <span
-                        className="part-dot"
-                        style={{ background: p.color }}
-                      />
-                      <span>{p.name}</span>
-                    </button>
-                    <Switch
-                      className="part-switch"
-                      aria-label={`Show ${p.name}`}
-                      checked={!hidden.includes(p.id)}
-                      onCheckedChange={(visible) => {
-                        setHidden((h) =>
-                          visible
-                            ? h.filter((id) => id !== p.id)
-                            : [...h, p.id],
-                        );
-                        if (!visible && selected === p.id) {
-                          setSelected(null);
-                          setIsolated(false);
-                        }
-                      }}
+            {!compare && (
+              <>
+                <div className="scene-caption">
+                  <span className="live-dot" />
+                  {kind === 'fission'
+                    ? 'PRESSURIZED WATER REACTOR'
+                    : 'TOKAMAK · CONCEPTUAL POWER PLANT'}
+                </div>
+                <Tabs
+                  className="mode-selector"
+                  value={mode}
+                  onValueChange={(v) => changeMode(v as Mode)}
+                >
+                  <TabsList aria-label="Exploration mode">
+                    <TabsTrigger value="assemble">
+                      <Box />
+                      Assemble
+                    </TabsTrigger>
+                    <TabsTrigger value="dissect">
+                      <Scan />
+                      Dissect
+                    </TabsTrigger>
+                    <TabsTrigger value="operate">
+                      <Activity />
+                      Operate
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                <button
+                  className="mobile-parts-button"
+                  onClick={() => setMobileParts((v) => !v)}
+                >
+                  <Layers3 size={15} />
+                  {mobileParts ? 'Close components' : 'Components'}
+                </button>
+              </>
+            )}
+            {compare ? (
+              <div className="comparison-scenes">
+                {(['fission', 'fusion'] as Kind[]).map((k) => (
+                  <section className={`comparison-cell ${k}`} key={k}>
+                    <div className="comparison-label">
+                      <span className="eyebrow">
+                        {k === 'fission' ? '01 / FISSION' : '02 / FUSION'}
+                      </span>
+                      <h2>
+                        {k === 'fission'
+                          ? 'One heavy nucleus splits.'
+                          : 'Two light nuclei combine.'}
+                      </h2>
+                    </div>
+                    <ReactorScene
+                      kind={k}
+                      view="nucleus"
+                      explode={0}
+                      progress={progress}
+                      playing={playing}
+                      operating
+                      compact
+                      reset={reset}
                     />
-                  </div>
+                    <div className="equation">
+                      {k === 'fission'
+                        ? '²³⁵U + n → ¹⁴¹Ba + ⁹²Kr + 3n'
+                        : '²H + ³H → ⁴He + n'}
+                      <span>+ energy</span>
+                    </div>
+                  </section>
                 ))}
               </div>
-              <div className="layers-footer">
-                <button
-                  onClick={() => {
-                    setHidden([]);
-                    setIsolated(false);
-                    setSelected(null);
-                  }}
-                >
-                  Show all
-                </button>
-                <span>
-                  {
-                    PARTS[kind].filter(
-                      (p) =>
-                        !hidden.includes(p.id) &&
-                        (!isolated || selected === p.id),
-                    ).length
-                  }{' '}
-                  / 8 visible
-                </span>
-              </div>
-            </aside>
-          )}
-          {!compare && view === 'nucleus' && (
-            <aside className="nucleus-key glass">
-              <span className="eyebrow">AT THE NUCLEAR SCALE</span>
-              <h2>
-                {kind === 'fission'
-                  ? 'A chain begins here.'
-                  : 'Light nuclei. New energy.'}
-              </h2>
-              <p>
-                {kind === 'fission'
-                  ? 'A neutron meets uranium-235. Scrub forward to see the nucleus split and release more neutrons.'
-                  : 'Deuterium and tritium combine, producing a helium nucleus and a neutron.'}
-              </p>
-              <div className="particle-key">
-                <span>
-                  <i className="proton" />
-                  Proton
-                </span>
-                <span>
-                  <i className="neutron" />
-                  Neutron
-                </span>
-              </div>
-              <p className="model-note">
-                Positions and timing are illustrative. Nuclei are not solid
-                balls.
-              </p>
-            </aside>
-          )}
-          {!compare && (
-            <div className="view-tools">
-              <Tabs value={view} onValueChange={(v) => changeView(v as View)}>
-                <TabsList aria-label="Model scale">
-                  <TabsTrigger value="machine">
-                    <Box />
-                    Machine
-                  </TabsTrigger>
-                  <TabsTrigger value="nucleus">
-                    <Atom />
-                    Nucleus
-                  </TabsTrigger>
-                </TabsList>
-              </Tabs>
-              {mode === 'dissect' && view === 'machine' && (
-                <button
-                  className={`pull-mode-button ${pullParts ? 'active' : ''}`}
-                  aria-pressed={pullParts}
-                  onClick={() => setPullParts((v) => !v)}
-                >
-                  <Layers3 size={14} />
-                  {pullParts ? 'Pull to explore' : 'Orbit only'}
-                </button>
-              )}
-              <div className="camera-buttons">
-                <button
-                  className={`icon-button ${cameraView === 'perspective' ? 'active' : ''}`}
-                  title="Perspective view"
-                  aria-label="Perspective view"
-                  onClick={() => setCameraView('perspective')}
-                >
-                  ¾
-                </button>
-                <button
-                  className={`icon-button ${cameraView === 'front' ? 'active' : ''}`}
-                  title="Front view"
-                  aria-label="Front view"
-                  onClick={() => setCameraView('front')}
-                >
-                  F
-                </button>
-                <button
-                  className={`icon-button ${cameraView === 'top' ? 'active' : ''}`}
-                  title="Top view"
-                  aria-label="Top view"
-                  onClick={() => setCameraView('top')}
-                >
-                  T
-                </button>
-                <span className="tool-divider" />
-                <button
-                  className={`icon-button ${rotation ? 'active' : ''}`}
-                  aria-label="Auto rotate"
-                  aria-pressed={rotation}
-                  onClick={() => setRotation((v) => !v)}
-                >
-                  <Orbit size={17} />
-                </button>
-                <button
-                  className="icon-button"
-                  aria-label="Reset view and layers"
-                  onClick={resetAll}
-                >
-                  <RotateCcw size={16} />
-                </button>
-              </div>
-              {view === 'machine' && (
-                <label className="label-toggle" htmlFor="show-model-labels">
-                  <Switch
-                    id="show-model-labels"
-                    checked={labels}
-                    onCheckedChange={setLabels}
-                    aria-label="Show model labels"
-                  />
-                  Labels
-                </label>
-              )}
-            </div>
-          )}
-          {!compare && (
-            <aside
-              className={`inspector glass ${part ? 'has-selection' : ''}`}
-              aria-label="Component explanation"
-            >
-              <div className="inspector-top">
-                <span className="eyebrow">
-                  {part
-                    ? 'COMPONENT / ' +
-                      String(PARTS[kind].indexOf(part) + 1).padStart(2, '0')
-                    : operating
-                      ? 'ENERGY JOURNEY'
-                      : 'THE BIG PICTURE'}
-                </span>
-                {part && (
+            ) : (
+              <ReactorScene kind={kind} {...sceneProps} />
+            )}
+            {!compare && view === 'machine' && (
+              <aside
+                className={`layers-panel glass ${mobileParts ? 'mobile-open' : ''}`}
+                aria-label="Model components"
+              >
+                <div className="panel-heading">
+                  <Layers3 size={16} />
+                  <strong>Inside the machine</strong>
+                  <span className="count">08</span>
+                </div>
+                <p className="panel-subtitle">Select a part to look closer.</p>
+                <div className="parts-list">
+                  {PARTS[kind].map((p, i) => (
+                    <div
+                      className={`part-row ${selected === p.id ? 'selected' : ''} ${hidden.includes(p.id) ? 'hidden-part' : ''}`}
+                      key={p.id}
+                    >
+                      <button
+                        className="part-select"
+                        onClick={() => selectPart(p.id)}
+                        aria-pressed={selected === p.id}
+                      >
+                        <span className="part-number">0{i + 1}</span>
+                        <span
+                          className="part-dot"
+                          style={{ background: p.color }}
+                        />
+                        <span>{p.name}</span>
+                      </button>
+                      <Switch
+                        className="part-switch"
+                        aria-label={`Show ${p.name}`}
+                        checked={!hidden.includes(p.id)}
+                        onCheckedChange={(visible) => {
+                          setHidden((h) =>
+                            visible
+                              ? h.filter((id) => id !== p.id)
+                              : [...h, p.id],
+                          );
+                          if (!visible && selected === p.id) {
+                            setSelected(null);
+                            setIsolated(false);
+                          }
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+                <div className="layers-footer">
                   <button
-                    aria-label="Close component details"
                     onClick={() => {
-                      setSelected(null);
+                      setHidden([]);
                       setIsolated(false);
+                      setSelected(null);
                     }}
                   >
-                    ×
+                    Show all
                   </button>
-                )}
-              </div>
-              <h2>
-                {part
-                  ? part.name
-                  : operating
-                    ? stage.title
-                    : kind === 'fission'
-                      ? 'Split. Heat. Spin.'
-                      : 'Confine. Fuse. Capture.'}
-              </h2>
-              <p>
-                {part
-                  ? part.description
-                  : operating
-                    ? stage.description
-                    : kind === 'fission'
-                      ? 'Start with the core. Follow its heat through two separate water circuits, all the way to the generator.'
-                      : 'Explore a tokamak, then follow a conceptual route from fusion heat to electricity.'}
-              </p>
-              {part ? (
-                <>
-                  <button
-                    className="primary-button dive-button"
-                    onClick={() => openPart(part.id)}
-                  >
-                    <Layers3 size={16} />
-                    Dissect inside
-                    <ArrowRight size={15} />
-                  </button>
-                  <div className="insight">
-                    <span>{part.role}</span>
-                    <p>{part.fact}</p>
-                  </div>
-                  <button
-                    className={`outline-button ${isolated ? 'active' : ''}`}
-                    onClick={() => setIsolated((v) => !v)}
-                  >
-                    <Focus size={15} />
-                    {isolated
-                      ? 'Show surrounding parts'
-                      : 'Isolate this component'}
-                  </button>
-                  <a
-                    className="source-link"
-                    href={SOURCES[part.source].url}
-                    target="_blank"
-                    rel="noreferrer"
-                  >
-                    Read the science <ArrowUpRight size={13} />
-                  </a>
-                </>
-              ) : (
-                <>
-                  <div className="energy-chain">
-                    <span>Nuclear</span>
-                    <ChevronRight />
-                    <span>Heat</span>
-                    <ChevronRight />
-                    <span>Motion</span>
-                  </div>
-                  <button className="primary-button" onClick={playJourney}>
-                    <Play size={14} fill="currentColor" />
-                    Follow the energy
-                    <ArrowRight size={15} />
-                  </button>
-                </>
-              )}
-            </aside>
-          )}
-          {!compare && view === 'nucleus' && (
-            <div className="reaction-equation">
-              <span className="eyebrow">
-                {kind === 'fission'
-                  ? 'ONE POSSIBLE FISSION CHANNEL'
-                  : 'DEUTERIUM–TRITIUM FUSION'}
-              </span>
-              <div>
-                {kind === 'fission'
-                  ? '²³⁵U + n → ¹⁴¹Ba + ⁹²Kr + 3n'
-                  : '²H + ³H → ⁴He + n'}
-                <span> + energy</span>
-              </div>
-            </div>
-          )}
-          <div className="orbit-hint">
-            <MoveUpRight size={14} />
-            <span>
-              {mode === 'dissect' && pullParts && view === 'machine'
-                ? 'Pull a part to explore inside · Drag empty space to orbit'
-                : 'Drag to orbit · Pinch or scroll to zoom'}
-            </span>
-          </div>
-          <div
-            className={`transport glass ${compare ? 'compare-transport' : ''}`}
-          >
-            {mode === 'dissect' && !compare ? (
-              <>
-                <div className="transport-top">
-                  <div>
-                    <span className="eyebrow">DISSECT THE MACHINE</span>
-                    <h2>One machine. Every layer.</h2>
-                  </div>
-                  <span className="percent-value">
-                    {Math.round(explode)}
-                    <small>%</small>
+                  <span>
+                    {
+                      PARTS[kind].filter(
+                        (p) =>
+                          !hidden.includes(p.id) &&
+                          (!isolated || selected === p.id),
+                      ).length
+                    }{' '}
+                    / 8 visible
                   </span>
                 </div>
-                <Slider
-                  aria-label="Separate components"
-                  value={[explode]}
-                  onValueChange={(v) => setExplode(numberValue(v))}
-                />
-                <div className="range-labels">
-                  <span>Assembled</span>
-                  <span>Fully separated</span>
+              </aside>
+            )}
+            {!compare && view === 'nucleus' && (
+              <aside className="nucleus-key glass">
+                <span className="eyebrow">AT THE NUCLEAR SCALE</span>
+                <h2>
+                  {kind === 'fission'
+                    ? 'A chain begins here.'
+                    : 'Light nuclei. New energy.'}
+                </h2>
+                <p>
+                  {kind === 'fission'
+                    ? 'A neutron meets uranium-235. Scrub forward to see the nucleus split and release more neutrons.'
+                    : 'Deuterium and tritium combine, producing a helium nucleus and a neutron.'}
+                </p>
+                <div className="particle-key">
+                  <span>
+                    <i className="proton" />
+                    Proton
+                  </span>
+                  <span>
+                    <i className="neutron" />
+                    Neutron
+                  </span>
                 </div>
-              </>
-            ) : (
-              <>
-                <div className="transport-top">
+                <p className="model-note">
+                  Positions and timing are illustrative. Nuclei are not solid
+                  balls.
+                </p>
+              </aside>
+            )}
+            {!compare && (
+              <div className="view-tools">
+                <Tabs value={view} onValueChange={(v) => changeView(v as View)}>
+                  <TabsList aria-label="Model scale">
+                    <TabsTrigger value="machine">
+                      <Box />
+                      Machine
+                    </TabsTrigger>
+                    <TabsTrigger value="nucleus">
+                      <Atom />
+                      Nucleus
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+                {mode === 'dissect' && view === 'machine' && (
                   <button
-                    className="play-button"
-                    onClick={togglePlayback}
-                    aria-label={
-                      playing
-                        ? 'Pause animation'
-                        : mode === 'assemble'
-                          ? 'Play assembly'
-                          : compare
-                            ? 'Play both reactions'
-                            : 'Play energy journey'
-                    }
+                    className={`pull-mode-button ${pullParts ? 'active' : ''}`}
+                    aria-pressed={pullParts}
+                    onClick={() => setPullParts((v) => !v)}
                   >
-                    {playing ? (
-                      <Pause size={18} fill="currentColor" />
-                    ) : (
-                      <Play size={18} fill="currentColor" />
-                    )}
+                    <Layers3 size={14} />
+                    {pullParts ? 'Pull to explore' : 'Orbit only'}
                   </button>
-                  <div className="transport-title">
-                    <span className="eyebrow">
-                      {mode === 'assemble'
-                        ? 'FROM PARTS TO WHOLE'
-                        : compare
-                          ? 'FISSION / FUSION'
-                          : reactionOnly
-                            ? 'INSIDE THE REACTION'
-                            : `STEP ${stageIndex(progress) + 1} OF 5`}
-                    </span>
-                    <h2>
-                      {mode === 'assemble'
-                        ? assembly >= 100
-                          ? 'Ready to explore.'
-                          : 'Bring it all together.'
-                        : compare
-                          ? 'Two reactions. Side by side.'
-                          : reactionOnly
-                            ? kind === 'fission'
-                              ? 'Watch one fission event.'
-                              : 'Watch nuclei combine.'
-                            : stage.title}
-                    </h2>
-                  </div>
+                )}
+                <div className="camera-buttons">
                   <button
-                    className="speed-button"
-                    onClick={() =>
-                      setSpeed((v) => (v === 1 ? 0.5 : v === 0.5 ? 2 : 1))
-                    }
-                    aria-label={`Playback speed ${speed} times. Change speed.`}
+                    className={`icon-button ${cameraView === 'perspective' ? 'active' : ''}`}
+                    title="Perspective view"
+                    aria-label="Perspective view"
+                    onClick={() => setCameraView('perspective')}
                   >
-                    {speed}×
+                    ¾
+                  </button>
+                  <button
+                    className={`icon-button ${cameraView === 'front' ? 'active' : ''}`}
+                    title="Front view"
+                    aria-label="Front view"
+                    onClick={() => setCameraView('front')}
+                  >
+                    F
+                  </button>
+                  <button
+                    className={`icon-button ${cameraView === 'top' ? 'active' : ''}`}
+                    title="Top view"
+                    aria-label="Top view"
+                    onClick={() => setCameraView('top')}
+                  >
+                    T
+                  </button>
+                  <span className="tool-divider" />
+                  <button
+                    className={`icon-button ${rotation ? 'active' : ''}`}
+                    aria-label="Auto rotate"
+                    aria-pressed={rotation}
+                    onClick={() => setRotation((v) => !v)}
+                  >
+                    <Orbit size={17} />
                   </button>
                   <button
                     className="icon-button"
-                    aria-label="Restart animation"
-                    onClick={() => {
-                      setPlaying(false);
-                      setProgress(0);
-                      setAssembly(0);
-                      if (follow && !compare) setView('nucleus');
-                    }}
+                    aria-label="Reset view and layers"
+                    onClick={resetAll}
                   >
                     <RotateCcw size={16} />
                   </button>
                 </div>
-                <Slider
-                  aria-label={
-                    mode === 'assemble'
-                      ? 'Assembly progress'
-                      : 'Reaction and energy timeline'
-                  }
-                  value={[mode === 'assemble' ? assembly : progress]}
-                  max={mode === 'assemble' ? 100 : maxProgress}
-                  onValueChange={(v) => {
-                    if (mode === 'assemble') {
-                      setAssembly(numberValue(v));
-                      stop();
-                    } else seek(numberValue(v));
-                  }}
-                />
-                {mode === 'assemble' ? (
-                  <div className="range-labels">
-                    <span>Individual components</span>
-                    <span>{Math.round(assembly)}% assembled</span>
-                  </div>
-                ) : reactionOnly ? (
-                  <div className="range-labels">
-                    <span>Before the reaction</span>
-                    <span>Products + energy</span>
-                  </div>
-                ) : (
-                  <div className="journey-stages">
-                    {STAGES[kind].map((s, i) => (
-                      <button
-                        className={
-                          stageIndex(progress) === i
-                            ? 'current'
-                            : progress > i * 20
-                              ? 'complete'
-                              : ''
-                        }
-                        onClick={() => {
-                          setFollow(true);
-                          setProgress(i * 20);
-                          setView(s.view);
-                          setSelected(s.view === 'machine' ? s.part : null);
-                          setPlaying(false);
-                        }}
-                        key={s.short}
-                        aria-current={
-                          stageIndex(progress) === i ? 'step' : undefined
-                        }
-                      >
-                        <span>
-                          {progress > (i + 1) * 20 ? (
-                            <Check size={10} />
-                          ) : (
-                            i + 1
-                          )}
-                        </span>
-                        {s.short}
-                      </button>
-                    ))}
-                  </div>
+                {view === 'machine' && (
+                  <label className="label-toggle" htmlFor="show-model-labels">
+                    <Switch
+                      id="show-model-labels"
+                      checked={labels}
+                      onCheckedChange={setLabels}
+                      aria-label="Show model labels"
+                    />
+                    Labels
+                  </label>
                 )}
-              </>
+              </div>
             )}
+            {!compare && (
+              <aside
+                className={`inspector glass ${part ? 'has-selection' : ''}`}
+                aria-label="Component explanation"
+              >
+                <div className="inspector-top">
+                  <span className="eyebrow">
+                    {part
+                      ? 'COMPONENT / ' +
+                        String(PARTS[kind].indexOf(part) + 1).padStart(2, '0')
+                      : operating
+                        ? 'ENERGY JOURNEY'
+                        : 'THE BIG PICTURE'}
+                  </span>
+                  {part && (
+                    <button
+                      aria-label="Close component details"
+                      onClick={() => {
+                        setSelected(null);
+                        setIsolated(false);
+                      }}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
+                <h2>
+                  {part
+                    ? part.name
+                    : operating
+                      ? stage.title
+                      : kind === 'fission'
+                        ? 'Split. Heat. Spin.'
+                        : 'Confine. Fuse. Capture.'}
+                </h2>
+                <p>
+                  {part
+                    ? part.description
+                    : operating
+                      ? stage.description
+                      : kind === 'fission'
+                        ? 'Start with the core. Follow its heat through two separate water circuits, all the way to the generator.'
+                        : 'Explore a tokamak, then follow a conceptual route from fusion heat to electricity.'}
+                </p>
+                {part ? (
+                  <>
+                    <button
+                      className="primary-button dive-button"
+                      onClick={() => openPart(part.id)}
+                    >
+                      <Layers3 size={16} />
+                      Dissect inside
+                      <ArrowRight size={15} />
+                    </button>
+                    <div className="insight">
+                      <span>{part.role}</span>
+                      <p>{part.fact}</p>
+                    </div>
+                    <button
+                      className={`outline-button ${isolated ? 'active' : ''}`}
+                      onClick={() => setIsolated((v) => !v)}
+                    >
+                      <Focus size={15} />
+                      {isolated
+                        ? 'Show surrounding parts'
+                        : 'Isolate this component'}
+                    </button>
+                    <a
+                      className="source-link"
+                      href={SOURCES[part.source].url}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Read the science <ArrowUpRight size={13} />
+                    </a>
+                  </>
+                ) : (
+                  <>
+                    <div className="energy-chain">
+                      <span>Nuclear</span>
+                      <ChevronRight />
+                      <span>Heat</span>
+                      <ChevronRight />
+                      <span>Motion</span>
+                    </div>
+                    <button className="primary-button" onClick={playJourney}>
+                      <Play size={14} fill="currentColor" />
+                      Follow the energy
+                      <ArrowRight size={15} />
+                    </button>
+                  </>
+                )}
+              </aside>
+            )}
+            {!compare && view === 'nucleus' && (
+              <div className="reaction-equation">
+                <span className="eyebrow">
+                  {kind === 'fission'
+                    ? 'ONE POSSIBLE FISSION CHANNEL'
+                    : 'DEUTERIUM–TRITIUM FUSION'}
+                </span>
+                <div>
+                  {kind === 'fission'
+                    ? '²³⁵U + n → ¹⁴¹Ba + ⁹²Kr + 3n'
+                    : '²H + ³H → ⁴He + n'}
+                  <span> + energy</span>
+                </div>
+              </div>
+            )}
+            <div className="orbit-hint">
+              <MoveUpRight size={14} />
+              <span>
+                {mode === 'dissect' && pullParts && view === 'machine'
+                  ? 'Pull a part to explore inside · Drag empty space to orbit'
+                  : 'Drag to orbit · Pinch or scroll to zoom'}
+              </span>
+            </div>
+            {!dissecting && (
+              <div
+                className={`transport glass ${compare ? 'compare-transport' : ''}`}
+              >
+                <>
+                  <div className="transport-top">
+                    <button
+                      className="play-button"
+                      onClick={togglePlayback}
+                      aria-label={
+                        playing
+                          ? 'Pause animation'
+                          : mode === 'assemble'
+                            ? 'Play assembly'
+                            : compare
+                              ? 'Play both reactions'
+                              : 'Play energy journey'
+                      }
+                    >
+                      {playing ? (
+                        <Pause size={18} fill="currentColor" />
+                      ) : (
+                        <Play size={18} fill="currentColor" />
+                      )}
+                    </button>
+                    <div className="transport-title">
+                      <span className="eyebrow">
+                        {mode === 'assemble'
+                          ? 'FROM PARTS TO WHOLE'
+                          : compare
+                            ? 'FISSION / FUSION'
+                            : reactionOnly
+                              ? 'INSIDE THE REACTION'
+                              : `STEP ${stageIndex(progress) + 1} OF 5`}
+                      </span>
+                      <h2>
+                        {mode === 'assemble'
+                          ? assembly >= 100
+                            ? 'Ready to explore.'
+                            : 'Bring it all together.'
+                          : compare
+                            ? 'Two reactions. Side by side.'
+                            : reactionOnly
+                              ? kind === 'fission'
+                                ? 'Watch one fission event.'
+                                : 'Watch nuclei combine.'
+                              : stage.title}
+                      </h2>
+                    </div>
+                    <button
+                      className="speed-button"
+                      onClick={() =>
+                        setSpeed((v) => (v === 1 ? 0.5 : v === 0.5 ? 2 : 1))
+                      }
+                      aria-label={`Playback speed ${speed} times. Change speed.`}
+                    >
+                      {speed}×
+                    </button>
+                    <button
+                      className="icon-button"
+                      aria-label="Restart animation"
+                      onClick={() => {
+                        setPlaying(false);
+                        setProgress(0);
+                        setAssembly(0);
+                        if (follow && !compare) setView('nucleus');
+                      }}
+                    >
+                      <RotateCcw size={16} />
+                    </button>
+                  </div>
+                  <Slider
+                    aria-label={
+                      mode === 'assemble'
+                        ? 'Assembly progress'
+                        : 'Reaction and energy timeline'
+                    }
+                    value={[mode === 'assemble' ? assembly : progress]}
+                    max={mode === 'assemble' ? 100 : maxProgress}
+                    onValueChange={(v) => {
+                      if (mode === 'assemble') {
+                        setAssembly(numberValue(v));
+                        stop();
+                      } else seek(numberValue(v));
+                    }}
+                  />
+                  {mode === 'assemble' ? (
+                    <div className="range-labels">
+                      <span>Individual components</span>
+                      <span>{Math.round(assembly)}% assembled</span>
+                    </div>
+                  ) : reactionOnly ? (
+                    <div className="range-labels">
+                      <span>Before the reaction</span>
+                      <span>Products + energy</span>
+                    </div>
+                  ) : (
+                    <div className="journey-stages">
+                      {STAGES[kind].map((s, i) => (
+                        <button
+                          className={
+                            stageIndex(progress) === i
+                              ? 'current'
+                              : progress > i * 20
+                                ? 'complete'
+                                : ''
+                          }
+                          onClick={() => {
+                            setFollow(true);
+                            setProgress(i * 20);
+                            setView(s.view);
+                            setSelected(s.view === 'machine' ? s.part : null);
+                            setPlaying(false);
+                          }}
+                          key={s.short}
+                          aria-current={
+                            stageIndex(progress) === i ? 'step' : undefined
+                          }
+                        >
+                          <span>
+                            {progress > (i + 1) * 20 ? (
+                              <Check size={10} />
+                            ) : (
+                              i + 1
+                            )}
+                          </span>
+                          {s.short}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </>
+              </div>
+            )}
+            <div className="scale-note">
+              {compare
+                ? 'NUCLEAR REACTIONS'
+                : view === 'machine'
+                  ? 'ENGINEERING SCALE'
+                  : 'NUCLEAR SCALE'}
+              <span>Illustrative · Not to scale</span>
+            </div>
+          </section>
+        )}
+        {dissecting && (
+          <div className="transport depth-transport glass">
+            <div className="transport-top">
+              <div>
+                <span className="eyebrow">
+                  REACTOR TO CORE · LEVEL {depthState.index} OF{' '}
+                  {route.length - 1}
+                </span>
+                <h2>{depthState.label}</h2>
+              </div>
+              <span className="percent-value">
+                {Math.round(depth)}
+                <small>%</small>
+              </span>
+            </div>
+            <input
+              className="depth-range"
+              type="range"
+              min="0"
+              max="100"
+              step="0.1"
+              aria-label="Dissection depth"
+              aria-valuetext={`${depthState.label}, level ${depthState.index} of ${route.length - 1}`}
+              value={depth}
+              onChange={(e) => seekDepth(Number(e.target.value))}
+            />
+            <div className="range-labels">
+              <span>Whole reactor</span>
+              <span>{route.at(-1)?.label}</span>
+            </div>
+            <div className="depth-navigation">
+              <button
+                className="depth-back"
+                disabled={depth === 0}
+                onClick={() =>
+                  seekDepth(
+                    Math.max(
+                      0,
+                      ((depthState.index - 1) / route.length) * 100 +
+                        (depthState.index > 1 ? 1 : 0),
+                    ),
+                  )
+                }
+              >
+                ← Back a layer
+              </button>
+              {depthState.index < route.length - 1 ? (
+                <button
+                  onClick={() =>
+                    seekDepth(((depthState.index + 1) / route.length) * 100 + 1)
+                  }
+                >
+                  Next: {route[depthState.index + 1].label} →
+                </button>
+              ) : depthState.node?.reaction ? (
+                <button onClick={openCoreReaction}>
+                  See the {kind} reaction →
+                </button>
+              ) : (
+                <span>Innermost modeled layer</span>
+              )}
+            </div>
           </div>
-          <div className="scale-note">
-            {compare
-              ? 'NUCLEAR REACTIONS'
-              : view === 'machine'
-                ? 'ENGINEERING SCALE'
-                : 'NUCLEAR SCALE'}
-            <span>Illustrative · Not to scale</span>
-          </div>
-        </section>
-      )}
+        )}
+      </div>
       <footer>
         <span>
           <span className="footer-mark" />

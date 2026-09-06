@@ -3,6 +3,7 @@
 A 3D educational explorer for nuclear fission and fusion, inspired by the interaction pattern of [Human Atlas](https://github.com/ashemag/human-atlas).
 
 - Assemble and dissect eight independently selectable systems in each machine.
+- Use one continuous depth slider from the whole reactor to its innermost modeled layer. Drag backward to retrace the layers, or choose Next/Back. Selecting a machine component changes the slider’s branch.
 - Drill into every system: pull a component to open its internals, or use the labeled buttons. Breadcrumbs provide reversible navigation. Fission reaches fuel pellets, a schematic crystal, a uranium atom, and its nucleus; fusion reaches fuel ions and nuclei, plus magnet windings, cables, strands, and filaments.
 - Inspect, hide, isolate, or label components. Orbit with mouse, touch, or keyboard.
 - Follow five stages from a nuclear reaction to a power cycle with play/pause, seeking, replay, and speed controls.
@@ -30,8 +31,8 @@ The Three.js models are procedural; no external model downloads or API keys are 
 
 The model checks cover finite geometry and particle transforms, component coverage, flow paths, timeline boundaries, assembly endpoints, and reaction accounting. Nested-dissection checks cover branch resolution, core routes, drag thresholds, and finite geometry at every layer. Type checking and the production build are separate checks.
 
-No browser interaction or visual QA was performed in this build. Optional WebMCP tools are feature-detected and register only in supported browsers; a supported validation context was unavailable, so their browser contracts remain unverified.
+Browser validation covered uninterrupted slider drags into both fuel nuclei, reverse dragging, intermediate fission pellet layers, the fusion coil-to-filament branch, tritium navigation, reaction playback, and a 390 × 844 viewport. Screenshots were inspected at desktop and phone widths. WebMCP valid calls were checked against visible page state; invalid component input was rejected without mutating state.
 
 ## Optional WebMCP
 
-`get_nuclear_atlas_state` reads the current state. `explore_nuclear_atlas` selects a process, optionally selects a component, and sets a dissection amount. Invalid input is rejected before changing state. The tools perform only in-page actions and require no external service.
+`get_nuclear_atlas_state` reads the current state. `explore_nuclear_atlas` selects a process, optionally selects a component, and sets dissection depth (0 = whole reactor, 100 = innermost modeled layer on that branch). Invalid input is rejected before changing state. The tools perform only in-page actions and require no external service.

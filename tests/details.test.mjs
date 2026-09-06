@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import * as T from 'three';
 import {
   DETAIL_ROOTS,
+  depthRoute,
+  depthSample,
   resolveDetailPath,
   canEnter,
   dragCompletion,
@@ -107,3 +109,39 @@ for (const kind of ['fission', 'fusion'])
     geometries.forEach((g) => g.dispose());
     materials.forEach((m) => m.dispose());
   });
+
+test('One depth sweep visits every fission level and reverses to the assembled machine', () => {
+  const route = depthRoute('fission');
+  assert.equal(route.length, 8);
+  const visited = new Set();
+  for (let p = 0; p <= 100; p += 0.5)
+    visited.add(depthSample(route, p).path.join('/'));
+  assert.equal(visited.size, route.length);
+  assert.equal(depthSample(route, 100).node.shape, 'uranium');
+  for (let p = 100; p >= 0; p -= 0.5)
+    assert.ok(visited.has(depthSample(route, p).path.join('/')));
+  assert.deepEqual(depthSample(route, 0).path, []);
+  assert.equal(depthSample(route, 0).separation, 0);
+});
+test('Fusion depth reaches nuclei; alternate paths preserve tritium and magnet interiors', () => {
+  assert.equal(depthSample(depthRoute('fusion'), 100).node.shape, 'deuterium');
+  assert.equal(
+    depthSample(depthRoute('fusion', ['plasma', 'fuel-ions', 'tritium']), 100)
+      .node.shape,
+    'tritium',
+  );
+  assert.equal(
+    depthSample(depthRoute('fusion', ['coils']), 100).node.id,
+    'filaments',
+  );
+});
+test('All system sliders reach their innermost modeled component without crossing branches', () => {
+  for (const kind of ['fission', 'fusion'])
+    for (const root of DETAIL_ROOTS[kind]) {
+      const route = depthRoute(kind, [root.id]);
+      assert.equal(route[1].node.id, root.id);
+      assert.equal(depthSample(route, 100).node.children.length, 0);
+      for (const level of route.slice(1))
+        assert.equal(resolveDetailPath(kind, level.path).at(-1), level.node);
+    }
+});

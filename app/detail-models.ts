@@ -314,7 +314,7 @@ export function createDetailModel(node: DetailNode): Machine {
       id: child.id,
       group,
       base: group.position.clone(),
-      offset: new T.Vector3(...child.offset),
+      offset: terminal ? new T.Vector3() : new T.Vector3(...child.offset),
       anchor: new T.Vector3(0, 1.3, 0),
     });
   }

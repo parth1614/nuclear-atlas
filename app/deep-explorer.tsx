@@ -12,7 +12,6 @@ import {
   Focus,
   ArrowUpRight,
 } from 'lucide-react';
-import { Slider } from '@/components/ui/slider';
 import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Switch } from '@/components/ui/switch';
 import ReactorScene from './reactor-scene';
@@ -24,7 +23,9 @@ export default function DeepExplorer({
   onNavigate,
   onExit,
   onReaction,
+  separation,
 }: {
+  separation: number;
   kind: Kind;
   path: string[];
   onNavigate: (path: string[]) => void;
@@ -33,8 +34,7 @@ export default function DeepExplorer({
 }) {
   const chain = resolveDetailPath(kind, path),
     node = chain.at(-1)!;
-  const [separation, setSeparation] = useState(25),
-    [selected, setSelected] = useState<string | null>(null),
+  const [selected, setSelected] = useState<string | null>(null),
     [isolated, setIsolated] = useState(false),
     [pull, setPull] = useState(true),
     [labels, setLabels] = useState(false),
@@ -54,7 +54,6 @@ export default function DeepExplorer({
     if (child && canEnter(child)) onNavigate([...path, id]);
   };
   const resetParts = () => {
-    setSeparation(0);
     setReset((v) => v + 1);
     setIsolated(false);
     setSelected(null);
@@ -97,7 +96,7 @@ export default function DeepExplorer({
         <h1>Inside {node.name.toLowerCase()}.</h1>
         <p>
           {node.children.length
-            ? 'Pull a part out to open its next layer.'
+            ? 'Keep dragging the depth slider, or pull a part to choose a different path.'
             : 'You’ve reached the innermost modeled layer.'}
         </p>
       </div>
@@ -232,33 +231,6 @@ export default function DeepExplorer({
           <ArrowUpRight size={13} />
         </a>
       </aside>
-      <div className="transport deep-transport glass">
-        <div className="transport-top">
-          <div>
-            <span className="eyebrow">DISSECT THIS LAYER</span>
-            <h2>
-              {node.children.length
-                ? 'Reveal what’s inside.'
-                : 'Inspect the core.'}
-            </h2>
-          </div>
-          <span className="percent-value">
-            {Math.round(separation)}
-            <small>%</small>
-          </span>
-        </div>
-        <Slider
-          aria-label="Separate nested components"
-          value={[separation]}
-          onValueChange={(v) =>
-            setSeparation(Array.isArray(v) ? v[0] : (v as number))
-          }
-        />
-        <div className="range-labels">
-          <span>Assembled</span>
-          <span>Separated</span>
-        </div>
-      </div>
       <div className="deep-footnote">
         <span>
           {pull

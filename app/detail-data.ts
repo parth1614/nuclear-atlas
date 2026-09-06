@@ -112,7 +112,7 @@ const crystal = n(
     n(
       'oxygen-sites',
       'Oxygen sites',
-      'lattice',
+      'oxygen',
       'Oxygen atoms are part of the ceramic fuel structure. They are not the fissile uranium nuclei that sustain the chain reaction.',
       [],
       {
@@ -801,4 +801,53 @@ export function canEnter(node: DetailNode) {
 }
 export function dragCompletion(dx: number, dy: number) {
   return Math.min(1, Math.hypot(dx, dy) / 90);
+}
+
+export interface DepthLevel {
+  path: string[];
+  label: string;
+  node?: DetailNode;
+}
+// The fuel path is the default; choosing hardware follows that component instead.
+export function depthRoute(kind: Kind, preferred: string[] = []): DepthLevel[] {
+  const route: DepthLevel[] = [{ path: [], label: 'Whole reactor' }];
+  const defaults: Record<string, string> = {
+    'fuel-rods': 'pellets',
+    crystal: 'uranium-atom',
+    'uranium-atom': 'nucleus',
+    plasma: 'fuel-ions',
+    'fuel-ions': 'deuterium',
+    generator: 'stator',
+    vessel: kind === 'fission' ? 'fuel' : 'plasma',
+  };
+  let choices = DETAIL_ROOTS[kind];
+  let path: string[] = [];
+  while (choices.length) {
+    const preferredId =
+      preferred[path.length] ??
+      (path.length === 0
+        ? kind === 'fission'
+          ? 'fuel'
+          : 'plasma'
+        : defaults[path.at(-1)!]);
+    const node =
+      choices.find((n) => n.id === preferredId) ??
+      choices.find((n) => canEnter(n)) ??
+      choices[0];
+    path = [...path, node.id];
+    route.push({ path, label: node.name, node });
+    choices = node.children;
+  }
+  return route;
+}
+export function depthSample(route: DepthLevel[], value: number) {
+  const depth = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+  const position = (depth / 100) * route.length;
+  const index = Math.min(route.length - 1, Math.floor(position));
+  return {
+    ...route[index],
+    index,
+    depth,
+    separation: Math.min(100, (position - index) * 100),
+  };
 }
